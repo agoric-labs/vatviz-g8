@@ -13,11 +13,8 @@
   </section>
   <div id="graph" style="text-align: left"></div>
   <script>
-    globalThis.renderDot = (dot) =>
-      d3.select("#graph").graphviz().renderDot(dot);
-    renderDot("digraph  {a -> b}");
+    globalThis.renderDot = dot => d3.select('#graph').graphviz().renderDot(dot);
+    renderDot('digraph  {a -> b}');
   </script>
-  <fieldset>
-    <label>SLOG file: <input type="file" name="slog" /></label>
-  </fieldset>
+  <section id="ui"></section>
 </body>
