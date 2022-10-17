@@ -2,6 +2,11 @@
   "scripts": {
     "dev": "node scripts/serve.js"
   },
+  "prettier": {
+    "arrowParens": "avoid",
+    "trailingComma": "all",
+    "singleQuote": true
+  },
   "devDependencies": {
     "esbuild": "^0.15.11"
   }
