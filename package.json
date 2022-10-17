@@ -1,0 +1,8 @@
+{
+  "scripts": {
+    "dev": "node scripts/serve.js"
+  },
+  "devDependencies": {
+    "esbuild": "^0.15.11"
+  }
+}

@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<head>
+  <title>vatViz - visualization of SwingSet vat logs</title>
+  <script type="module" src="js/app.js"></script>
+  <script src="//d3js.org/d3.v5.min.js"></script>
+  <script src="https://unpkg.com/@hpcc-js/wasm@0.3.11/dist/index.min.js"></script>
+  <script src="https://unpkg.com/d3-graphviz@3.0.5/build/d3-graphviz.js"></script>
+</head>
+<body>
+  <h1>vatViz - visualization of SwingSet vat logs</h1>
+  <section id="ui">
+    <noscript>Try turning on JavaScript?</noscript>
+  </section>
+  <div id="graph" style="text-align: left"></div>
+  <script>
+    globalThis.renderDot = (dot) =>
+      d3.select("#graph").graphviz().renderDot(dot);
+    renderDot("digraph  {a -> b}");
+  </script>
+  <fieldset>
+    <label>SLOG file: <input type="file" name="slog" /></label>
+  </fieldset>
+</body>
