@@ -13,7 +13,9 @@
   </section>
   <div id="graph" style="text-align: left"></div>
   <script>
-    globalThis.renderDot = dot => d3.select('#graph').graphviz().renderDot(dot);
+    const graphviz = d3.select('#graph').graphviz();
+    // graphviz.engine('twopi');
+    globalThis.renderDot = dot => graphviz.renderDot(dot);
     renderDot('digraph  {a -> b}');
   </script>
   <section id="ui"></section>
