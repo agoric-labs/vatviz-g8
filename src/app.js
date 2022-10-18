@@ -163,6 +163,9 @@ const slogToDot = (cranks, cranksToShow) => {
   );
   console.log({ kopToVat, vatContents, pendingPromises });
 
+  // @@@ TODO/IDEA: show clists as records with o+N as well as voM
+  // group vat A's imported objects by vat from whence they come.
+  // make just 1 arrow for all of them to B.
   const subgraphs = [...vatContents.entries()].map(
     ([v, os]) =>
       `subgraph cluster_${v} { label="${v}"; node [shape=none]; ${v}; ${[
@@ -194,6 +197,8 @@ const slogToDot = (cranks, cranksToShow) => {
   );
   const fmtEvents = (kp, e) =>
     e ? [`${kp} [label="${kp} <- ${fmtMsg(e.ksc[2].methargs)}"]`] : [];
+
+  // @@@IDEA/TODO: use arc labels
   const sendNodes = [...pendingPromises.values()].flatMap(kps =>
     kps.flatMap(kp => fmtEvents(kp, pendingSends.get(kp))),
   );
