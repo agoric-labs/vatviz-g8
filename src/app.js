@@ -40,6 +40,7 @@ const parseCranks = slogText => {
 
 const slogToDot = (cranks, cranksToShow) => {
   const sends = [];
+  const invokes = [];
   const msgs = [];
   const notifies = [];
   const imports = [];
@@ -71,10 +72,11 @@ const slogToDot = (cranks, cranksToShow) => {
       case 'clist': {
         switch (event.mode) {
           case 'import':
-            imports.push(event);
             if (event.kobj.startsWith('kd')) {
               kopToVat.set(event.kobj, 'kernel');
             }
+            if (event.crankNum >= cranksToShow - 1) break;
+            imports.push(event);
             break;
           case 'export':
             kopToVat.set(event.kobj, event.vatID);
@@ -117,6 +119,13 @@ const slogToDot = (cranks, cranksToShow) => {
           case 'vatstoreGetAfter':
           case 'vatstoreSet':
             break;
+          case 'invoke': {
+            if (event.crankNum !== cranksToShow - 1) {
+              break;
+            }
+            invokes.push(event);
+            break;
+          }
           case 'send': {
             const [_s, _t, { result }] = event.ksc;
             kopToVat.set(result, event.vatID);
@@ -177,6 +186,12 @@ const slogToDot = (cranks, cranksToShow) => {
     ({ vatID, ksc: [_s, target, { methargs }] }) =>
       `${vatID} -> ${target} [label="${fmtMsg(methargs)}"]`,
   );
+  const invokeArcs = invokes.map(
+    ({ vatID, ksc: [_s, target, method, { body, slots }] }) =>
+      `${vatID} -> ${target} [label="${`.${method}(...${
+        body.length
+      }, ${slots.join(',')})`}"]`,
+  );
   const fmtEvents = (kp, e) =>
     e ? [`${kp} [label="${kp} <- ${fmtMsg(e.ksc[2].methargs)}"]`] : [];
   const sendNodes = [...pendingPromises.values()].flatMap(kps =>
@@ -192,6 +207,7 @@ const slogToDot = (cranks, cranksToShow) => {
     ...subgraphs,
     ...importArcs,
     ...sendArcs,
+    ...invokeArcs,
     ...msgArcs,
     ...notifyNodes,
     ...sendNodes,
