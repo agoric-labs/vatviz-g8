@@ -1,5 +1,4 @@
 // @ts-check
-// @ts-check
 import { h, render } from 'preact';
 import { useState, useEffect } from 'preact/hooks';
 import htm from 'htm';
@@ -13,6 +12,16 @@ const die = why => {
   throw new Error(why);
 };
 
+/** @type {(crank: Crank) => boolean} */
+const notRouting = crank => crank.events[0].crankType !== 'routing';
+
+/**
+ * @param {string} slogText
+ * @returns {Crank[]}
+ *
+ * @typedef {{ crankNum: number, events: Readonly<Readonly<SlogEvent>[]>, lines: Readonly<string[]> }} Crank
+ * @typedef {{ time: number, monotime: number, crankNum?: number, type: string, crankType?: string }} SlogEvent
+ */
 const parseCranks = slogText => {
   const lines = slogText.trim().split('\n');
   const cranks = [];
@@ -21,13 +30,16 @@ const parseCranks = slogText => {
   let crankNum = 0;
   const { freeze } = Object;
   for (const line of lines) {
+    /** @type {SlogEvent} */
     const event = JSON.parse(line);
-    while (event.crankNum > crankNum) {
-      cranks.push({
-        crankNum,
-        events: freeze(events),
-        lines: freeze(crankLines),
-      });
+    while ((event.crankNum || 0) > crankNum) {
+      cranks.push(
+        freeze({
+          crankNum,
+          events: freeze(events),
+          lines: freeze(crankLines),
+        }),
+      );
       events = [];
       crankLines = [];
       crankNum += 1;
@@ -35,6 +47,17 @@ const parseCranks = slogText => {
     events.push(freeze(event));
     crankLines.push(line.slice(0, 1024));
   }
+  if (events.length > 0) {
+    cranks.push(
+      freeze({
+        crankNum,
+        events: freeze(events),
+        lines: freeze(crankLines),
+      }),
+    );
+  }
+  freeze(cranks);
+
   return cranks;
 };
 
@@ -61,10 +84,13 @@ const slogToDot = (cranks, cranksToShow) => {
     .slice(0, cranksToShow)
     .map(c => c.events)
     .flat();
+  const currentCrankNum = cranks[cranksToShow - 1].events[0].crankNum;
 
   for (const event of events) {
     const { type } = event;
     typeCounts.set(type, (typeCounts.get(type) || 0) + 1);
+    const current = event.crankNum === currentCrankNum;
+
     switch (type) {
       // case 'create-vat':
       //   // ... event.vatID ?
@@ -75,7 +101,7 @@ const slogToDot = (cranks, cranksToShow) => {
             if (event.kobj.startsWith('kd')) {
               kopToVat.set(event.kobj, 'kernel');
             }
-            if (event.crankNum >= cranksToShow - 1) break;
+            if (current) break;
             imports.push(event);
             break;
           case 'export':
@@ -90,15 +116,13 @@ const slogToDot = (cranks, cranksToShow) => {
             const [_m, target, { result }] = kd;
             kopToVat.set(target, vatID);
 
-            if (crankNum !== cranksToShow - 1) {
-              break;
-            }
+            if (!current) break;
             msgs.push(event);
             break;
           }
           case 'notify': {
             const [_n, resolutions] = event.kd;
-            if (event.crankNum === cranksToShow - 1) {
+            if (current) {
               notifies.push(event);
               break;
             }
@@ -120,9 +144,7 @@ const slogToDot = (cranks, cranksToShow) => {
           case 'vatstoreSet':
             break;
           case 'invoke': {
-            if (event.crankNum !== cranksToShow - 1) {
-              break;
-            }
+            if (!current) break;
             invokes.push(event);
             break;
           }
@@ -131,9 +153,8 @@ const slogToDot = (cranks, cranksToShow) => {
             kopToVat.set(result, event.vatID);
             pendingSends.set(result, event);
 
-            if (event.crankNum !== cranksToShow - 1) {
-              break;
-            }
+            if (!current) break;
+
             sends.push(event);
             break;
           }
@@ -242,7 +263,7 @@ const App =
             ? fr.result
             : die(`expected string; got: ${fr.result}`);
         console.log({ txt: txt.slice(0, 80) });
-        setCranks(parseCranks(txt));
+        setCranks(parseCranks(txt).filter(notRouting));
       });
       fr.readAsText(file);
     };
