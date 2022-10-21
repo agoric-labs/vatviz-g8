@@ -61,6 +61,107 @@ const parseCranks = slogText => {
   return cranks;
 };
 
+const threshold = 8;
+const fmtMsg = ({ body, slots }) => {
+  const [method] = JSON.parse(body);
+  return `.${method}(...${body.length}, ${slots.join(',')})`;
+};
+
+const { freeze, entries } = Object;
+
+const fmtDot = () => {
+  const q = s => JSON.stringify(s);
+  const fmtAttrs = attrs => {
+    const es = entries(attrs);
+    return es.map(([n, v]) => `${n}=${q(v)}`).join(', ');
+  };
+  const withAttrs = attrs => {
+    const es = entries(attrs);
+    return es.length === 0 ? '' : ' [' + fmtAttrs(attrs) + ']';
+  };
+
+  return freeze({
+    digraph: (gAttrs, items) => `
+      digraph {
+        ${fmtAttrs(gAttrs)}
+        ${items.join('\n')}
+      }`,
+    fmtAttrs,
+    withAttrs,
+    nodeCluster: (c, ns) =>
+      `subgraph cluster_${c} { label=${q(c)}; node [shape=none]; ${c}; ${[
+        ...ns,
+      ].join(';')} }`,
+    arc: (src, dest, attrs) => `${q(src)} -> ${q(dest)}` + withAttrs(attrs),
+    node: (n, attrs) => q(n) + withAttrs(attrs),
+  });
+};
+
+const fmtSlogDot = ({
+  kopToVat,
+  vatContents,
+  imports,
+  pendingPromises,
+  msgs,
+  notifies,
+  cranksToShow,
+  sends,
+  invokes,
+  pendingSends,
+}) => {
+  console.log({ kopToVat, vatContents, pendingPromises });
+
+  const d = fmtDot();
+
+  // @@@ TODO/IDEA: show clists as records with o+N as well as voM
+  // group vat A's imported objects by vat from whence they come.
+  // make just 1 arrow for all of them to B.
+  const subgraphs = [...vatContents.entries()].map(([v, os]) =>
+    d.nodeCluster(v, [
+      os.filter(o => !o.startsWith('kp')),
+      ...(pendingPromises.get(v) || []),
+    ]),
+  );
+
+  const msgArcs = msgs.map(({ kd: [_m, target, { methargs, result }] }) =>
+    d.arc(kopToVat.get(result) || result, target, { label: fmtMsg(methargs) }),
+  );
+  const notifyNodes = notifies.flatMap(({ kd: [_n, rs] }) =>
+    rs.map(([kp, res]) => d.node(kp, { label: `${kp}: ${res.state}` })),
+  );
+  console.log(cranksToShow, 'msgs', msgs, notifyNodes);
+
+  const sendArcs = sends.map(({ vatID, ksc: [_s, target, { methargs }] }) =>
+    d.arc(vatID, target, { label: fmtMsg(methargs) }),
+  );
+  const invokeArcs = invokes.map(
+    ({ vatID, ksc: [_s, target, method, { body, slots }] }) =>
+      d.arc(vatID, target, {
+        label: `.${method}(...${body.length}, ${slots.join(',')})`,
+      }),
+  );
+  const fmtEvents = (kp, e) =>
+    e ? [d.node(kp, { label: `${kp} <- ${fmtMsg(e.ksc[2].methargs)}` })] : [];
+
+  // @@@IDEA/TODO: use arc labels
+  const sendNodes = [...pendingPromises.values()].flatMap(kps =>
+    kps.flatMap(kp => fmtEvents(kp, pendingSends.get(kp))),
+  );
+  const importArcs = imports
+    .filter(({ kobj }) => !kobj.startsWith('kp'))
+    .map(({ vatID, kobj }) => d.arc(vatID, kobj, { style: 'dotted' }));
+  return d.digraph({ rankdir: 'LR' }, [
+    `edge` + d.withAttrs({ fontsize: 8 }) + ';',
+    ...subgraphs,
+    ...importArcs,
+    ...sendArcs,
+    ...invokeArcs,
+    ...msgArcs,
+    ...notifyNodes,
+    ...sendNodes,
+  ]);
+};
+
 const slogToDot = (cranks, cranksToShow) => {
   const sends = [];
   const invokes = [];
@@ -73,12 +174,6 @@ const slogToDot = (cranks, cranksToShow) => {
   /** @type {Map<string, string[]>} */
   const pendingPromises = new Map();
   const pendingSends = new Map();
-
-  const threshold = 8;
-  const fmtMsg = ({ body, slots }) => {
-    const [method] = JSON.parse(body);
-    return `.${method}(...${body.length}, ${slots.join(',')})`;
-  };
 
   const events = cranks
     .slice(0, cranksToShow)
@@ -98,10 +193,6 @@ const slogToDot = (cranks, cranksToShow) => {
       case 'clist': {
         switch (event.mode) {
           case 'import':
-            if (event.kobj.startsWith('kd')) {
-              kopToVat.set(event.kobj, 'kernel');
-            }
-            if (current) break;
             imports.push(event);
             break;
           case 'export':
@@ -182,63 +273,19 @@ const slogToDot = (cranks, cranksToShow) => {
       [...kopToVat.keys()].filter(o => kopToVat.get(o) === v),
     ]),
   );
-  console.log({ kopToVat, vatContents, pendingPromises });
 
-  // @@@ TODO/IDEA: show clists as records with o+N as well as voM
-  // group vat A's imported objects by vat from whence they come.
-  // make just 1 arrow for all of them to B.
-  const subgraphs = [...vatContents.entries()].map(
-    ([v, os]) =>
-      `subgraph cluster_${v} { label="${v}"; node [shape=none]; ${v}; ${[
-        ...os.filter(o => !o.startsWith('kp')),
-        ...(pendingPromises.get(v) || []),
-      ].join(';')} }`,
-  );
-
-  const msgArcs = msgs.map(
-    ({ kd: [_m, target, { methargs, result }] }) =>
-      `${kopToVat.get(result) || result} -> ${target} [label="${fmtMsg(
-        methargs,
-      )}"]`,
-  );
-  const notifyNodes = notifies.flatMap(({ kd: [_n, rs] }) =>
-    rs.map(([kp, res]) => `${kp} [label="${kp}: ${res.state}"]`),
-  );
-  console.log(cranksToShow, 'msgs', msgs, notifyNodes);
-
-  const sendArcs = sends.map(
-    ({ vatID, ksc: [_s, target, { methargs }] }) =>
-      `${vatID} -> ${target} [label="${fmtMsg(methargs)}"]`,
-  );
-  const invokeArcs = invokes.map(
-    ({ vatID, ksc: [_s, target, method, { body, slots }] }) =>
-      `${vatID} -> ${target} [label="${`.${method}(...${
-        body.length
-      }, ${slots.join(',')})`}"]`,
-  );
-  const fmtEvents = (kp, e) =>
-    e ? [`${kp} [label="${kp} <- ${fmtMsg(e.ksc[2].methargs)}"]`] : [];
-
-  // @@@IDEA/TODO: use arc labels
-  const sendNodes = [...pendingPromises.values()].flatMap(kps =>
-    kps.flatMap(kp => fmtEvents(kp, pendingSends.get(kp))),
-  );
-  const importArcs = imports
-    .filter(({ kobj }) => !kobj.startsWith('kp'))
-    .map(({ vatID, kobj }) => `${vatID} -> ${kobj} [style=dotted]`);
-  return [
-    `digraph {
-      rankdir=LR;
-      edge [fontsize=8]; `,
-    ...subgraphs,
-    ...importArcs,
-    ...sendArcs,
-    ...invokeArcs,
-    ...msgArcs,
-    ...notifyNodes,
-    ...sendNodes,
-    `}`,
-  ].join('\n');
+  return fmtSlogDot({
+    kopToVat,
+    vatContents,
+    imports,
+    pendingPromises,
+    msgs,
+    notifies,
+    cranksToShow,
+    sends,
+    invokes,
+    pendingSends,
+  });
 };
 
 const App =
@@ -269,6 +316,7 @@ const App =
     };
 
     useEffect(() => {
+      if (!cranks.length) return;
       const dot = slogToDot(cranks, cranksToShow);
       console.log('renderDot:', dot);
       renderDot(dot);
