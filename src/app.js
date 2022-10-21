@@ -71,16 +71,19 @@ const parseCranks = slogText => {
 const threshold = 8;
 const fmtMsg = ({ body, slots }) => {
   const [method] = JSON.parse(body);
-  return `.${method}(...${body.length}, ${slots.join(',')})`;
+  const args = body.slice(`["${method}"]`.length);
+  return `.${method}(${args.slice(0, threshold)}${
+    args.length > threshold ? `...${args.length}` : ''
+  }, ${slots.slice(0, 3).join(',')})`;
 };
 
 const { freeze, entries } = Object;
 
 const fmtDot = () => {
   const q = s => JSON.stringify(s);
-  const fmtAttrs = attrs => {
+  const fmtAttrs = (attrs, sep = ', ') => {
     const es = entries(attrs);
-    return es.map(([n, v]) => `${n}=${q(v)}`).join(', ');
+    return es.map(([n, v]) => `${n}=${q(v)}`).join(sep);
   };
   const withAttrs = attrs => {
     const es = entries(attrs);
@@ -90,7 +93,7 @@ const fmtDot = () => {
   return freeze({
     digraph: (gAttrs, items) => `
       digraph {
-        ${fmtAttrs(gAttrs)}
+        ${fmtAttrs(gAttrs, ';\n')}
         ${items.join('\n')}
       }`,
     fmtAttrs,
@@ -99,11 +102,12 @@ const fmtDot = () => {
       `subgraph cluster_${c} { ${fmtAttrs(
         cAttrs,
       )}; node [shape=none]; ${c} [label=""]; ${[...ns].join(';')} }`,
-    arc: (src, dest, attrs) => `${q(src)} -> ${q(dest)}` + withAttrs(attrs),
-    node: (n, attrs) => q(n) + withAttrs(attrs),
+    arc: (src, dest, attrs) => `${src} -> ${dest}` + withAttrs(attrs),
+    node: (n, attrs) => n + withAttrs(attrs),
     rec,
     subRec: (...parts) => `{${rec(...parts)}}`,
-    port: (port, part) => `<${port}>${part}`,
+    port: (port, part) => `<${port}> ${part}`,
+    portRef: (node, port) => `${node}:${port}`,
   });
 };
 
@@ -181,6 +185,7 @@ const slogToDot = (cranks, cranksToShow, notes) => {
   const clist = {
     imports: /**@type {SlogEvent[]} */ ([]),
     exports: /**@type {SlogEvent[]} */ ([]),
+    importing: /**@type {SlogEvent[]} */ ([]),
   };
   /** @type {Map<string, number>} */
   const typeCounts = new Map();
@@ -205,10 +210,18 @@ const slogToDot = (cranks, cranksToShow, notes) => {
         switch (event.mode) {
           case 'import':
             clist.imports.push(event);
+            clist.importing.push(event);
             break;
           case 'export':
             clist.exports.push(event);
             break;
+          case 'drop': {
+            const ix = clist.importing.findIndex(
+              e => e.vatID === event.vatID && e.kobj === event.kobj,
+            );
+            if (ix) clist.importing.splice(ix, 1);
+            break;
+          }
         }
         break;
       }
@@ -293,24 +306,36 @@ const slogToDot = (cranks, cranksToShow, notes) => {
     ]),
   );
 
-  if (0) {
-    return fmtSlogDot({
-      kopToVat,
-      vatContents,
-      imports: clist.imports,
-      pendingPromises,
-      msgs,
-      notifies,
-      cranksToShow,
-      sends,
-      invokes,
-      pendingSends,
-    });
-  }
   const d = fmtDot();
 
+  const objToImpPort = new Map(
+    vats.flatMap(v => {
+      const cl = clist.exports.filter(
+        e => e.vatID === v.vatID && !e.kobj.startsWith('kp'),
+      );
+      return cl.map(e => [e.kobj, d.portRef(`${v.vatID}_exports`, e.kobj)]);
+    }),
+  );
+  console.log({ pendingPromises, pendingSends, msgs, objToImpPort });
+
+  const portOpt = o => objToImpPort.get(o) || o;
+
   const msgArcs = msgs.map(({ kd: [_m, target, { methargs, result }] }) =>
-    d.arc(kopToVat.get(result) || result, target, { label: fmtMsg(methargs) }),
+    d.arc(kopToVat.get(result) || result, portOpt(target), {
+      label: fmtMsg(methargs),
+    }),
+  );
+  const eventArcs = (kp, e) =>
+    e
+      ? [
+          d.arc(kp, portOpt(e.ksc[1]), {
+            label: fmtMsg(e.ksc[2].methargs),
+            style: 'dashed',
+          }),
+        ]
+      : [];
+  const pendingSendArcs = [...pendingPromises.values()].flatMap(kps =>
+    kps.flatMap(kp => eventArcs(kp, pendingSends.get(kp))),
   );
 
   const clistByVat = new Map(
@@ -321,12 +346,15 @@ const slogToDot = (cranks, cranksToShow, notes) => {
       return [v.vatID, cl];
     }),
   );
+  const portLabel = (vatID, kobj) => notes.exports?.[vatID]?.[kobj] || kobj;
   const clistRec = vatID =>
     d.rec(
       'exports',
       ...clistByVat
         .get(vatID)
-        ?.map(({ vobj, kobj }) => d.subRec(vobj, d.port(kobj, kobj))),
+        ?.map(({ vobj, kobj }) =>
+          d.subRec(vobj, d.port(kobj, portLabel(vatID, kobj))),
+        ),
     );
 
   const clusters = vats.map(({ vatID, name }) => {
@@ -338,15 +366,36 @@ const slogToDot = (cranks, cranksToShow, notes) => {
       );
 
     return d.nodeCluster(vatID, { label: name ? `${vatID}:${name}` : vatID }, [
-      d.node(`${vatID}_imports`, {
+      d.node(`${vatID}_exports`, {
         shape: 'record',
         label: clistRec(vatID),
       }),
-      internalObjects.map(d.node),
+      [
+        ...internalObjects.map(d.node),
+        ...(pendingPromises.get(vatID) || []).map(d.node),
+      ],
     ]);
   });
 
-  return d.digraph({ rankdir: 'LR' }, [...clusters, ...msgArcs]);
+  const importArcs = clist.importing
+    .filter(({ kobj }) => !kobj.startsWith('kp') && !kobj.startsWith('kd'))
+    .map(({ vatID, kobj }) => d.arc(vatID, portOpt(kobj), { style: 'dotted' }));
+
+  const objLabels = entries(notes.objects).map(([obj, label]) =>
+    d.node(obj, { label, shape: 'none' }),
+  );
+  const pLabels = notifies.flatMap(e =>
+    e.kd[1].map(r => d.node(r[0], { style: r[1] ? 'bold' : 'italic' })),
+  );
+
+  return d.digraph({ rankdir: 'LR', fontsize: 10 }, [
+    ...objLabels,
+    ...pLabels,
+    ...clusters,
+    ...pendingSendArcs,
+    ...msgArcs,
+    ...importArcs,
+  ]);
 };
 
 const App =
