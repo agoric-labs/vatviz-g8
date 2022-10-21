@@ -20,7 +20,14 @@ const notRouting = crank => crank.events[0].crankType !== 'routing';
  * @returns {Crank[]}
  *
  * @typedef {{ crankNum: number, events: Readonly<Readonly<SlogEvent>[]>, lines: Readonly<string[]> }} Crank
- * @typedef {{ time: number, monotime: number, crankNum?: number, type: string, crankType?: string }} SlogEvent
+ * @typedef {{
+ *   time: number,
+ *   monotime: number,
+ *   crankNum?: number,
+ *   type: string,
+ *   crankType?: string,
+ *   vatID?: string,
+ * }} SlogEvent
  */
 const parseCranks = slogText => {
   const lines = slogText.trim().split('\n');
@@ -79,7 +86,7 @@ const fmtDot = () => {
     const es = entries(attrs);
     return es.length === 0 ? '' : ' [' + fmtAttrs(attrs) + ']';
   };
-
+  const rec = (...parts) => parts.join('|');
   return freeze({
     digraph: (gAttrs, items) => `
       digraph {
@@ -88,12 +95,15 @@ const fmtDot = () => {
       }`,
     fmtAttrs,
     withAttrs,
-    nodeCluster: (c, ns) =>
-      `subgraph cluster_${c} { label=${q(c)}; node [shape=none]; ${c}; ${[
-        ...ns,
-      ].join(';')} }`,
+    nodeCluster: (c, cAttrs, ns) =>
+      `subgraph cluster_${c} { ${fmtAttrs(
+        cAttrs,
+      )}; node [shape=none]; ${c} [label=""]; ${[...ns].join(';')} }`,
     arc: (src, dest, attrs) => `${q(src)} -> ${q(dest)}` + withAttrs(attrs),
     node: (n, attrs) => q(n) + withAttrs(attrs),
+    rec,
+    subRec: (...parts) => `{${rec(...parts)}}`,
+    port: (port, part) => `<${port}>${part}`,
   });
 };
 
@@ -117,7 +127,7 @@ const fmtSlogDot = ({
   // group vat A's imported objects by vat from whence they come.
   // make just 1 arrow for all of them to B.
   const subgraphs = [...vatContents.entries()].map(([v, os]) =>
-    d.nodeCluster(v, [
+    d.nodeCluster(v, { label: v }, [
       os.filter(o => !o.startsWith('kp')),
       ...(pendingPromises.get(v) || []),
     ]),
@@ -162,12 +172,16 @@ const fmtSlogDot = ({
   ]);
 };
 
-const slogToDot = (cranks, cranksToShow) => {
+const slogToDot = (cranks, cranksToShow, notes) => {
+  const vats = [];
   const sends = [];
   const invokes = [];
   const msgs = [];
   const notifies = [];
-  const imports = [];
+  const clist = {
+    imports: /**@type {SlogEvent[]} */ ([]),
+    exports: /**@type {SlogEvent[]} */ ([]),
+  };
   /** @type {Map<string, number>} */
   const typeCounts = new Map();
   const kopToVat = new Map();
@@ -187,21 +201,26 @@ const slogToDot = (cranks, cranksToShow) => {
     const current = event.crankNum === currentCrankNum;
 
     switch (type) {
-      // case 'create-vat':
-      //   // ... event.vatID ?
-      //   break;
       case 'clist': {
         switch (event.mode) {
           case 'import':
-            imports.push(event);
+            clist.imports.push(event);
             break;
           case 'export':
-            kopToVat.set(event.kobj, event.vatID);
+            clist.exports.push(event);
+            break;
         }
         break;
       }
       case 'deliver':
         switch (event.kd[0]) {
+          case 'startVat': {
+            const { vatID } = event;
+            const name = notes.vats[vatID];
+            vats.push({ vatID, name });
+            break;
+          }
+
           case 'message': {
             const { vatID, kd, crankNum } = event;
             const [_m, target, { result }] = kd;
@@ -268,34 +287,81 @@ const slogToDot = (cranks, cranksToShow) => {
   console.log({ typeCounts });
 
   const vatContents = new Map(
-    [...kopToVat.values()].map(v => [
+    vats.map(({ vatID: v }) => [
       v,
       [...kopToVat.keys()].filter(o => kopToVat.get(o) === v),
     ]),
   );
 
-  return fmtSlogDot({
-    kopToVat,
-    vatContents,
-    imports,
-    pendingPromises,
-    msgs,
-    notifies,
-    cranksToShow,
-    sends,
-    invokes,
-    pendingSends,
+  if (0) {
+    return fmtSlogDot({
+      kopToVat,
+      vatContents,
+      imports: clist.imports,
+      pendingPromises,
+      msgs,
+      notifies,
+      cranksToShow,
+      sends,
+      invokes,
+      pendingSends,
+    });
+  }
+  const d = fmtDot();
+
+  const msgArcs = msgs.map(({ kd: [_m, target, { methargs, result }] }) =>
+    d.arc(kopToVat.get(result) || result, target, { label: fmtMsg(methargs) }),
+  );
+
+  const clistByVat = new Map(
+    vats.map(v => {
+      const cl = clist.exports.filter(
+        e => e.vatID === v.vatID && !e.kobj.startsWith('kp'),
+      );
+      return [v.vatID, cl];
+    }),
+  );
+  const clistRec = vatID =>
+    d.rec(
+      'exports',
+      ...clistByVat
+        .get(vatID)
+        ?.map(({ vobj, kobj }) => d.subRec(vobj, d.port(kobj, kobj))),
+    );
+
+  const clusters = vats.map(({ vatID, name }) => {
+    const exp = clistByVat.get(vatID);
+    const internalObjects = vatContents
+      .get(vatID)
+      .filter(
+        o => !o.startsWith('kp') && exp?.filter(e => e.kobj === o).length === 0,
+      );
+
+    return d.nodeCluster(vatID, { label: name ? `${vatID}:${name}` : vatID }, [
+      d.node(`${vatID}_imports`, {
+        shape: 'record',
+        label: clistRec(vatID),
+      }),
+      internalObjects.map(d.node),
+    ]);
   });
+
+  return d.digraph({ rankdir: 'LR' }, [...clusters, ...msgArcs]);
 };
 
 const App =
-  ({ renderDot }) =>
+  ({ renderDot, querySelector }) =>
   () => {
     const [reason, setReason] = useState(/** @type {Error | null} */ (null));
     const [cranks, setCranks] = useState(
       /** @type {{ crankNum: number, events: readonly any[], lines: readonly string[] }[]} */ ([]),
     );
     const [cranksToShow, setCranksToShow] = useState(1);
+    const [notes, setNotes] = useState(
+      /** @type {{ vats: Record<string, string> }} */ (
+        JSON.parse(querySelector('textarea[name="annotations"]').value)
+      ),
+    );
 
     const handler = ev => {
       const [file] = ev.target?.files;
@@ -317,7 +383,7 @@ const App =
 
     useEffect(() => {
       if (!cranks.length) return;
-      const dot = slogToDot(cranks, cranksToShow);
+      const dot = slogToDot(cranks, cranksToShow, notes);
       console.log('renderDot:', dot);
       renderDot(dot);
     }, [cranks, cranksToShow]);
@@ -348,7 +414,13 @@ const App =
 
 const go = () => {
   const container = document.querySelector('#ui') || die('missing #ui');
-  render(html`<${App({ renderDot: globalThis.renderDot })} />`, container);
+  render(
+    html`<${App({
+      renderDot: globalThis.renderDot,
+      querySelector: sel => document.querySelector(sel),
+    })} />`,
+    container,
+  );
 };
 
 go();
