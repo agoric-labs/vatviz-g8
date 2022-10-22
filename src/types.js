@@ -38,9 +38,11 @@
  * }} CapData
  * @typedef { SlogVatEntry & {
  *   type: 'syscall',
- *   ksc: [tag: 'invoke' | 'subscribe' | 'vatstoreGet'| 'vatstoreSet' | 'vatstoreDelete' |
+ *   ksc: [tag: 'invoke' | 'vatstoreGet'| 'vatstoreGetAfter'|
+ *              'vatstoreSet' | 'vatstoreDelete' |
  *              'dropImports' | 'retireImports' | 'retireExports' ] |
  *        [tag: 'send', target: string, msg: Message] |
+ *        [tag: 'subscribe', xx: unknown, p: string] |
  *        [tag: 'resolve', target: string,
  *         resolutions: Array<[kp: string, rejected: boolean, value: CapData]>],
  * }} SlogSyscallEntry
@@ -66,6 +68,11 @@
  *   dr: [tag: unknown, x: unknown, meter: {}],
  * }} SlogDeliverResultEntry
  * @typedef { SlogTimedEntry & {
+ *  type: 'crank-start', crankNum: number, crankType: string }} SlogCrankStartEntry
+ * @typedef { SlogTimedEntry & {
+ *  type: 'clist', mode: 'import' | 'export' | 'drop',
+ *  vatID: string, vobj: string, kobj: string }} SlogCListEntry
+ * @typedef { SlogTimedEntry & {
  *   type: 'import-kernel-start' | 'import-kernel-finish'
  *       | 'vat-startup-start' | 'vat-startup-finish'
  *       | 'start-replay' | 'finish-replay'
@@ -74,14 +81,14 @@
  *       | 'cosmic-swingset-end-block-finish'
  *       | 'cosmic-swingset-deliver-inbound'
  *       | 'syscall-result'
- *       | 'clist'
- *       | 'crank-start' | 'crank-finish'
+ *       | 'crank-finish'
  *       | 'console'
  *       | '@@more TODO'
  * }} SlogToDoEntry
  * @typedef {|
  *  SlogDeliveryEntry | SlogSyscallEntry | SlogCreateVatEntry |
  *  SlogEndBlockStartEntry| SlogDeliverResultEntry |
+ *  SlogCrankStartEntry | SlogCListEntry |
  *  SlogToDoEntry
  * } SlogEntry
  */

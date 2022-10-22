@@ -11,23 +11,28 @@ export const html = htm.bind(h);
 const die = why => {
   throw new Error(why);
 };
+/** @type {<T,U>(x:T, f:(xx:T) => U) => U[]} */
+const maybe = (x, f) => (x ? [f(x)] : []);
 
 /** @type {(crank: Crank) => boolean} */
-const notRouting = crank => crank.events[0].crankType !== 'routing';
+const notRouting = crank => {
+  const [first] = crank.events;
+  return first.type !== 'crank-start' || first.crankType !== 'routing';
+};
+
+/** @param {SlogEntry} first */
+const crankStartNum = first =>
+  first.type === 'crank-start' ? first.crankNum : 0;
 
 /**
  * @param {string} slogText
  * @returns {Crank[]}
  *
- * @typedef {{ crankNum: number, events: Readonly<Readonly<SlogEvent>[]>, lines: Readonly<string[]> }} Crank
  * @typedef {{
- *   time: number,
- *   monotime: number,
- *   crankNum?: number,
- *   type: string,
- *   crankType?: string,
- *   vatID?: string,
- * }} SlogEvent
+ *   crankNum: number,
+ *   events: Readonly<Readonly<SlogEntry>[]>,
+ *   lines: Readonly<string[]>
+ * }} Crank
  */
 const parseCranks = slogText => {
   const lines = slogText.trim().split('\n');
@@ -37,9 +42,9 @@ const parseCranks = slogText => {
   let crankNum = 0;
   const { freeze } = Object;
   for (const line of lines) {
-    /** @type {SlogEvent} */
+    /** @type {SlogEntry} */
     const event = JSON.parse(line);
-    while ((event.crankNum || 0) > crankNum) {
+    while ((event.type === 'crank-start' ? event.crankNum : 0) > crankNum) {
       cranks.push(
         freeze({
           crankNum,
@@ -111,6 +116,17 @@ const fmtDot = () => {
   });
 };
 
+/**
+ *
+ * @param {Crank[]} cranks
+ * @param {number} cranksToShow
+ * @param {SlogAnnotation} notes
+ * @typedef {{
+ *   vats: Record<string, string>,
+ *   exports: Record<string, Record<string, string>>,
+ *   objects: Record<string, string>,
+ * }} SlogAnnotation
+ */
 const slogToDot = (cranks, cranksToShow, notes) => {
   const vats = [];
   const sends = [];
@@ -118,27 +134,29 @@ const slogToDot = (cranks, cranksToShow, notes) => {
   const msgs = [];
   const notifies = [];
   const clist = {
-    imports: /**@type {SlogEvent[]} */ ([]),
-    exports: /**@type {SlogEvent[]} */ ([]),
-    importing: /**@type {SlogEvent[]} */ ([]),
+    imports: /**@type {SlogCListEntry[]} */ ([]),
+    exports: /**@type {SlogCListEntry[]} */ ([]),
+    importing: /**@type {SlogCListEntry[]} */ ([]),
   };
   /** @type {Map<string, number>} */
   const typeCounts = new Map();
+  /** @type {Map<string, string>} */
   const kopToVat = new Map();
   /** @type {Map<string, string[]>} */
   const pendingPromises = new Map();
+  /** @type {Map<string, SlogSyscallEntry>} */
   const pendingSends = new Map();
 
   const events = cranks
     .slice(0, cranksToShow)
     .map(c => c.events)
     .flat();
-  const currentCrankNum = cranks[cranksToShow - 1].events[0].crankNum;
+  const currentCrankNum = crankStartNum(cranks[cranksToShow - 1].events[0]);
 
   for (const event of events) {
     const { type } = event;
     typeCounts.set(type, (typeCounts.get(type) || 0) + 1);
-    const current = event.crankNum === currentCrankNum;
+    const current = crankStartNum(event) === currentCrankNum;
 
     switch (type) {
       case 'clist': {
@@ -196,7 +214,8 @@ const slogToDot = (cranks, cranksToShow, notes) => {
         }
         break;
       case 'syscall': {
-        switch (event.ksc[0]) {
+        const { ksc } = event;
+        switch (ksc[0]) {
           case 'vatstoreGet':
           case 'vatstoreGetAfter':
           case 'vatstoreSet':
@@ -207,7 +226,7 @@ const slogToDot = (cranks, cranksToShow, notes) => {
             break;
           }
           case 'send': {
-            const [_s, _t, { result }] = event.ksc;
+            const [_s, _t, { result }] = ksc;
             kopToVat.set(result, event.vatID);
             pendingSends.set(result, event);
 
@@ -219,7 +238,7 @@ const slogToDot = (cranks, cranksToShow, notes) => {
           case 'subscribe':
             pendingPromises.set(event.vatID, [
               ...(pendingPromises.get(event.vatID) || []),
-              event.ksc[2],
+              ksc[2],
             ]);
             break;
 
@@ -260,17 +279,13 @@ const slogToDot = (cranks, cranksToShow, notes) => {
       label: fmtMsg(methargs),
     }),
   );
-  const eventArcs = (kp, e) =>
-    e
-      ? [
-          d.arc(kp, portOpt(e.ksc[1]), {
-            label: fmtMsg(e.ksc[2].methargs),
-            style: 'dashed',
-          }),
-        ]
-      : [];
+  const pendingArc = kp => e =>
+    d.arc(kp, portOpt(e.ksc[1]), {
+      label: fmtMsg(e.ksc[2].methargs),
+      style: 'dashed',
+    });
   const pendingSendArcs = [...pendingPromises.values()].flatMap(kps =>
-    kps.flatMap(kp => eventArcs(kp, pendingSends.get(kp))),
+    kps.flatMap(kp => maybe(pendingSends.get(kp), pendingArc(kp))),
   );
 
   const clistByVat = new Map(
@@ -285,20 +300,16 @@ const slogToDot = (cranks, cranksToShow, notes) => {
   const clistRec = vatID =>
     d.rec(
       'exports',
-      ...clistByVat
-        .get(vatID)
-        ?.map(({ vobj, kobj }) =>
-          d.subRec(vobj, d.port(kobj, portLabel(vatID, kobj))),
-        ),
+      ...(clistByVat.get(vatID) || die())?.map(({ vobj, kobj }) =>
+        d.subRec(vobj, d.port(kobj, portLabel(vatID, kobj))),
+      ),
     );
 
   const clusters = vats.map(({ vatID, name }) => {
     const exp = clistByVat.get(vatID);
-    const internalObjects = vatContents
-      .get(vatID)
-      .filter(
-        o => !o.startsWith('kp') && exp?.filter(e => e.kobj === o).length === 0,
-      );
+    const internalObjects = (vatContents.get(vatID) || die(vatID)).filter(
+      o => !o.startsWith('kp') && exp?.filter(e => e.kobj === o).length === 0,
+    );
 
     return d.nodeCluster(vatID, { label: name ? `${vatID}:${name}` : vatID }, [
       d.node(`${vatID}_exports`, {
@@ -342,7 +353,7 @@ const App =
     );
     const [cranksToShow, setCranksToShow] = useState(1);
     const [notes, setNotes] = useState(
-      /** @type {{ vats: Record<string, string> }} */ (
+      /** @type {SlogAnnotation} */ (
         JSON.parse(querySelector('textarea[name="annotations"]').value)
       ),
     );
