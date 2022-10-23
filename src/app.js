@@ -14,6 +14,23 @@ const die = why => {
 /** @type {<T,U>(x:T, f:(xx:T) => U) => U[]} */
 const maybe = (x, f) => (x ? [f(x)] : []);
 
+/**
+ * @template K, V
+ * @param {V[]} xs
+ * @param {(v: V) => K} getKey
+ * @returns {Map<K, V[]>}
+ */
+const groupBy = (xs, getKey) => {
+  /** @type {Map<K, V[]>} */
+  const m = new Map();
+  for (const x of xs) {
+    const key = getKey(x);
+    const old = m.get(key) || [];
+    m.set(key, [...old, x]);
+  }
+  return m;
+};
+
 /** @type {(crank: Crank) => boolean} */
 const notRouting = crank => {
   const [first] = crank.events;
@@ -86,16 +103,26 @@ const { freeze, entries } = Object;
 
 const fmtDot = () => {
   const q = s => JSON.stringify(s);
+  /**
+   * @param {Record<string,string|number>} attrs
+   * @param {string=} sep
+   */
   const fmtAttrs = (attrs, sep = ', ') => {
     const es = entries(attrs);
     return es.map(([n, v]) => `${n}=${q(v)}`).join(sep);
   };
+  /** @param {Record<string,string|number>} attrs */
   const withAttrs = attrs => {
     const es = entries(attrs);
     return es.length === 0 ? '' : ' [' + fmtAttrs(attrs) + ']';
   };
+  /** @param {string[]} parts */
   const rec = (...parts) => parts.join('|');
   return freeze({
+    /**
+     * @param {Record<string, string|number>} gAttrs
+     * @param {string[]} items
+     */
     digraph: (gAttrs, items) => `
       digraph {
         ${fmtAttrs(gAttrs, ';\n')}
@@ -103,11 +130,16 @@ const fmtDot = () => {
       }`,
     fmtAttrs,
     withAttrs,
-    nodeCluster: (c, cAttrs, ns) =>
+    /**
+     * @param {string} c
+     * @param {Record<string, string>} cAttrs
+     * @param {string[]} items
+     */
+    nodeCluster: (c, cAttrs, items) =>
       `subgraph cluster_${c} { ${fmtAttrs(
         cAttrs,
-      )}; node [shape=none]; ${c} [label=""]; ${[...ns].join(';')} }`,
-    arc: (src, dest, attrs) => `${src} -> ${dest}` + withAttrs(attrs),
+      )}; node [shape=none]; ${c} [label=""]; ${[...items].join(';\n')} }`,
+    arc: (src, dest, attrs = {}) => `${src} -> ${dest}` + withAttrs(attrs),
     node: (n, attrs) => n + withAttrs(attrs),
     rec,
     subRec: (...parts) => `{${rec(...parts)}}`,
@@ -167,6 +199,7 @@ const slogToDot = (cranks, cranksToShow, notes) => {
             break;
           case 'export':
             clist.exports.push(event);
+            kopToVat.set(event.kobj, event.vatID);
             break;
           case 'drop': {
             const ix = clist.importing.findIndex(
@@ -283,6 +316,7 @@ const slogToDot = (cranks, cranksToShow, notes) => {
     d.arc(kp, portOpt(e.ksc[1]), {
       label: fmtMsg(e.ksc[2].methargs),
       style: 'dashed',
+      fontsize: 8,
     });
   const pendingSendArcs = [...pendingPromises.values()].flatMap(kps =>
     kps.flatMap(kp => maybe(pendingSends.get(kp), pendingArc(kp))),
@@ -296,36 +330,65 @@ const slogToDot = (cranks, cranksToShow, notes) => {
       return [v.vatID, cl];
     }),
   );
+
+  const importsBySrc = groupBy(
+    clist.importing.filter(
+      ({ kobj }) => !kobj.startsWith('kp') && !kobj.startsWith('kd'),
+    ),
+    e => e.vatID,
+  );
+
   const portLabel = (vatID, kobj) => notes.exports?.[vatID]?.[kobj] || kobj;
   const clistRec = vatID =>
     d.rec(
       'exports',
       ...(clistByVat.get(vatID) || die())?.map(({ vobj, kobj }) =>
-        d.subRec(vobj, d.port(kobj, portLabel(vatID, kobj))),
+        // d.subRec(vobj, d.port(kobj, portLabel(vatID, kobj))),
+        d.port(kobj, portLabel(vatID, kobj)),
       ),
     );
 
+  const importArcs = [];
   const clusters = vats.map(({ vatID, name }) => {
     const exp = clistByVat.get(vatID);
     const internalObjects = (vatContents.get(vatID) || die(vatID)).filter(
       o => !o.startsWith('kp') && exp?.filter(e => e.kobj === o).length === 0,
     );
 
+    const importsByDest = groupBy(importsBySrc.get(vatID) || [], e =>
+      kopToVat.get(e.kobj),
+    );
+    const importItems = [...importsByDest.entries()].flatMap(
+      ([destVat, es2]) => {
+        const id = `import_${vatID}_${destVat}`;
+        const rec = d.node(id, {
+          shape: 'record',
+          fontsize: 10,
+          label: d.rec(
+            `from ${destVat || '??'}`,
+            ...es2.map(({ kobj }) => notes.objects[kobj] || kobj),
+          ),
+        });
+        if (destVat) {
+          importArcs.push(d.arc(id, destVat, { style: 'dotted' }));
+        }
+        return [rec];
+      },
+    );
+
     return d.nodeCluster(vatID, { label: name ? `${vatID}:${name}` : vatID }, [
       d.node(`${vatID}_exports`, {
         shape: 'record',
+        fontsize: 10,
         label: clistRec(vatID),
       }),
-      [
+      ...importItems,
+      ...[
         ...internalObjects.map(d.node),
         ...(pendingPromises.get(vatID) || []).map(d.node),
       ],
     ]);
   });
-
-  const importArcs = clist.importing
-    .filter(({ kobj }) => !kobj.startsWith('kp') && !kobj.startsWith('kd'))
-    .map(({ vatID, kobj }) => d.arc(vatID, portOpt(kobj), { style: 'dotted' }));
 
   const objLabels = entries(notes.objects).map(([obj, label]) =>
     d.node(obj, { label, shape: 'none' }),
