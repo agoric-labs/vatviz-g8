@@ -368,6 +368,7 @@ const slogToDot = (cranks, cranksToShow, notes) => {
             `from ${destVat || '??'}`,
             ...es2.map(({ kobj }) => notes.objects[kobj] || kobj),
           ),
+          href: `#${es2.map(({ kobj }) => kobj).join('_')}`,
         });
         if (destVat) {
           importArcs.push(d.arc(id, destVat, { style: 'dotted' }));
