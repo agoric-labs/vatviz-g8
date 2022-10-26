@@ -46,7 +46,7 @@
         "v15": "bank",
         "v16": "walletFactory",
         "v17": "governor: PSM(USDC_axl)",
-        "v18": "governor: ?",
+        "v18": "governor: PSM(AUSD)",
         "v19": "governor: ?",
         "v20": "PSM(USDC_axl)",
         "v21": "PSM(AUSD)",
@@ -55,7 +55,9 @@
     "exports": {
         "v1": {
             "ko21": "bootstrap*",
-            "ko135": "agoricNames"
+            "ko124": "bridgeManager",
+            "ko135": "agoricNames",
+            "ko280": "namesByAddressAdmin"
         },
         "v2": {
             "ko20": "vatAdmin*",
@@ -73,7 +75,7 @@
             "ko37": "zoeService",
             "ko40": "IST Issuer",
             "ko41": "Installation.41??",
-            "ko42": "Installation.42??",
+            "ko42": "Installation: mintHolder",
             "ko43": "Installation.43??",
             "ko44": "Installation.44??",
             "ko45": "Installation.45??",
@@ -84,13 +86,21 @@
             "ko57": "IST brand",
             "ko58": "Invitation issuer",
             "ko71": "Instance.71??",
-            "ko73": "Instance.73??",
+            "ko72": "zcfAdmin: mintHolder AUSD",
+            "ko73": "Instance: mintHolder AUSD",
             "ko74": "zcfAdmin: psmCharter",
             "ko75": "Instance.75??",
             "ko85": "adminFacet.85??",
             "ko87": "adminFacet.87??",
+            "ko88": "emptyPublicFacet.88",
             "ko96": "Instance.96??",
+            "ko104": "Invitation.104??",
+            "ko106": "IST payment.106",
+            "ko110": "emptyPublicFacet.110",
+            "ko115": "zcfAdmin: mintHolder BLD",
+            "ko116": "Instance: mintHolder BLD",
             "ko133": "Invitation.133??",
+            "ko134": "Invitation.134??",
             "ko139": "Invitation brand",
             "ko144": "zcfAdmin: walletFactory",
             "ko145": "InstanceH.145",
@@ -100,18 +110,25 @@
             "ko175": "zcfAdmin.175",
             "ko176": "Instance.176??",
             "ko178": "InstanceH.178",
+            "ko181": "IST ZoeMint",
             "ko273": "adminFacet.273??"
         },
         "v7": {
             "ko31": "board*",
             "ko38": "board",
-            "ko51": "boardSerializer"
+            "ko51": "boardSerializer",
+            "ko151": "board readonly marshaller"
         },
         "v8": {
             "ko32": "chainStorage*",
-            "ko59": "node.59",
-            "ko132": "node.132",
-            "ko149": "node.149"
+            "ko39": "published??",
+            "ko50": "published.agoricNames",
+            "ko52": "published.committee",
+            "ko53": "node.53??",
+            "ko59": "node.59??",
+            "ko132": "node.132??",
+            "ko142": "published.psm",
+            "ko149": "node.149??"
         },
         "v9": {
             "ko60": "zcf.9"
@@ -124,18 +141,44 @@
         "v11": {
             "ko79": "AUSD mint",
             "ko81": "AUSD issuer",
-            "ko91": "AUSD brand"
+            "ko91": "AUSD brand",
+            "ko128": "AUSD Purse.128",
+            "ko278": "AUSD Purse.278"
         },
         "v12": {
             "ko82": "psmCharterCreatorFacet"
         },
         "v13": {
-            "ko100": "cttee creatorFacet",
+            "ko100": "econ cttee creatorFacet",
+            "ko102": "econ cttee publicFacet",
             "ko129": "InvitationH.129",
-            "ko165": "InvitationH.165"
+            "ko130": "InvitationH.130",
+            "ko165": "InvitationH.165",
+            "ko249": "questionPoser.249",
+            "ko253": "econ cttee questionPoser.253"
         },
         "v14": {
+            "ko117": "BLD mint",
+            "ko119": "BLD issuer",
             "ko121": "BLD brand"
+        },
+        "v15": {
+            "ko122": "bank*",
+            "ko125": "bankHandler",
+            "ko126": "bankManager",
+            "ko164": "bank",
+            "ko226": "Asset Subscription",
+            "ko230": "SubscriptionIterator.230",
+            "ko231": "Virtual Purse.231",
+            "ko260": "Virtual Purse.260",
+            "ko271": "notifier.271",
+            "ko279": "notifier.279",
+            "ko282": "Virtual Purse.282",
+            "ko284": "notifier.284"
+        },
+        "v16": {
+            "ko146": "walletActionHandler",
+            "ko152": "walletFactoryCreator"
         },
         "v17": {
             "ko264": "psmGovernorFacet(USDC_axl)"
@@ -144,11 +187,20 @@
             "ko261": "gov. creatorFacet.261"
         },
         "v21": {
-            "ko150": "published.psm.IST.AUSD"
+            "ko150": "published.psm.IST.AUSD",
+            "ko222": "PSM(AUSD) governorFacet",
+            "ko224": "PSM(AUSD) public or limited? .224",
+            "ko236": "PSM(AUSD) public or limited? .236",
+            "ko237": "PSM(AUSD) paramRetriever.237",
+            "ko241": "PSM(AUSD) param manager",
+            "ko258": "PSM(AUSD) paramRetriever.258",
+            "ko259": "PSM(AUSD) paramRetriever.259"
         },
         "v22": {
             "ko216": "provisionPool governorFacet",
-            "ko217": "handleOffer.217"
+            "ko217": "handleOffer.217",
+            "ko232": "ProvisionPool creator",
+            "ko281": "provisioningHandler"
         }
     }
 }
