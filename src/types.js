@@ -28,8 +28,7 @@
  *   [tag: 'startVat', vatParameters: CapData]
  * } KernelDelivery
  * @typedef {{
- *   method: string,
- *   args: CapData,
+ *   methargs: CapData,
  *   result: string,
  * }} Message
  * @typedef {{
