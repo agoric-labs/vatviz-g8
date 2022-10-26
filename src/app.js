@@ -299,13 +299,16 @@ const slogToDot = (cranks, cranksToShow, notes) => {
             clist.exports.push(event);
             kopToVat.set(event.kobj, event.vatID);
             break;
-          case 'drop': {
-            const ix = clist.importing.findIndex(
-              e => e.vatID === event.vatID && e.kobj === event.kobj,
-            );
-            if (ix) clist.importing.splice(ix, 1);
-            break;
-          }
+          // how does drop relate to import and export?
+          // Is 1 drop enough to cancel out an import?
+          // It seems to lose references that way.
+          // case 'drop': {
+          //   const ix = clist.importing.findIndex(
+          //     e => e.vatID === event.vatID && e.kobj === event.kobj,
+          //   );
+          //   if (ix) clist.importing.splice(ix, 1);
+          //   break;
+          // }
         }
         break;
       }
@@ -489,15 +492,15 @@ const slogToDot = (cranks, cranksToShow, notes) => {
     ]);
   });
 
-  const objLabels = entries(notes.objects).map(([obj, label]) =>
-    d.node(obj, { label, shape: 'none' }),
-  );
+  // const objLabels = entries(notes.objects).map(([obj, label]) =>
+  //   d.node(obj, { label, shape: 'none' }),
+  // );
   const pLabels = notifies.flatMap(e =>
     e.kd[1].map(r => d.node(r[0], { style: r[1] ? 'bold' : 'italic' })),
   );
 
   return d.digraph({ rankdir: 'LR', fontsize: 10 }, [
-    ...objLabels,
+    // ...objLabels,
     ...pLabels,
     ...clusters,
     ...pendingSendArcs,
