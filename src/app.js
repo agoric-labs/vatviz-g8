@@ -5,6 +5,8 @@ import htm from 'htm';
 
 /** @template T @typedef {[T, import("preact/hooks").StateUpdater<T>]} StateT<T> */
 
+const { entries, fromEntries, freeze, values } = Object;
+
 // Initialize htm with Preact
 export const html = htm.bind(h);
 
@@ -99,8 +101,6 @@ const fmtMsg = ({ body, slots }) => {
   }, ${slots.slice(0, 3).join(',')})`;
 };
 
-const { freeze, entries } = Object;
-
 const fmtDot = () => {
   const q = s => JSON.stringify(s);
   /**
@@ -146,6 +146,104 @@ const fmtDot = () => {
     port: (port, part) => `<${port}> ${part}`,
     portRef: (node, port) => `${node}:${port}`,
   });
+};
+
+const placesIn = (
+  /** @type {string} */ k,
+  /** @type {unknown} */ x,
+  /** @type {(string|number)[]=}*/ path = [],
+) => {
+  const walk = (/** @type {unknown} */ e) => {
+    if (e === k) return [path];
+    if (Array.isArray(e)) {
+      let pos = 0;
+      for (const child of e) {
+        const sub = walk(child);
+        if (sub.length) return [[...path, pos, ...sub[0]]];
+        pos++;
+      }
+    } else if (e !== null && typeof e === 'object') {
+      for (const [prop, val] of entries(e)) {
+        const sub = walk(val);
+        if (sub.length) return [[...path, prop, ...sub[0]]];
+      }
+    }
+    return [];
+  };
+  return walk(x);
+};
+
+const theSlotRef = (target, { body, slots }) => {
+  const methargs = JSON.parse(body);
+  const ix = slots.findIndex(s => s === target);
+  /** @returns {string | false} */
+  const walk = tr => {
+    if (tr === null) return false;
+    else if (typeof tr === 'object') {
+      if ('@qclass' in tr) {
+        if (tr['@qclass'] === 'slot' && tr.index === ix)
+          return tr.iface || JSON.stringify(tr);
+      } else {
+        for (const [prop, val] of entries(tr)) {
+          const hit = walk(val);
+          if (hit) return hit;
+        }
+      }
+    } else if (Array.isArray(tr)) {
+      for (const child of tr) {
+        const hit = walk(child);
+        if (hit) return hit;
+      }
+    }
+    return false;
+  };
+  return walk(JSON.parse(body)) || die(target);
+};
+
+/**
+ * @param {string[]} kobjs
+ * @param {Crank[]} cranks
+ * @param {number} cranksToShow
+ */
+const findUsages = (kobjs, cranks, cranksToShow) => {
+  const events = cranks
+    .slice(0, cranksToShow)
+    .map(c => c.events)
+    .flat();
+
+  const usages = (/** @type {string} */ k, /** @type {SlogEntry} */ e) => {
+    switch (e.type) {
+      case 'deliver':
+        switch (e.kd[0]) {
+          case 'message':
+            if (e.kd[1] === k) return [k + fmtMsg(e.kd[2].methargs)];
+            if (e.kd[2].methargs.slots.includes(k)) {
+              return [theSlotRef(k, e.kd[2].methargs)];
+            }
+            break;
+          case 'notify':
+            for (const [_kp, { data }] of e.kd[1]) {
+              if (data.slots.includes(k)) {
+                return [theSlotRef(k, data)];
+              }
+            }
+            break;
+        }
+        break;
+      case 'syscall': {
+        switch (e.ksc[0]) {
+          case 'send':
+            if (e.ksc[1] === k) return [k + fmtMsg(e.ksc[2].methargs)];
+            if (e.ksc[2].methargs.slots.includes(k)) {
+              return [theSlotRef(k, e.ksc[2].methargs)];
+            }
+        }
+      }
+    }
+    return [];
+  };
+
+  return fromEntries(kobjs.map(k => [k, events.flatMap(e => usages(k, e))]));
 };
 
 /**
@@ -368,7 +466,7 @@ const slogToDot = (cranks, cranksToShow, notes) => {
             `from ${destVat || '??'}`,
             ...es2.map(({ kobj }) => notes.objects[kobj] || kobj),
           ),
-          href: `#${es2.map(({ kobj }) => kobj).join('_')}`,
+          href: `#${es2.map(({ kobj }) => kobj).join(',')}`,
         });
         if (destVat) {
           importArcs.push(d.arc(id, destVat, { style: 'dotted' }));
@@ -409,18 +507,24 @@ const slogToDot = (cranks, cranksToShow, notes) => {
 };
 
 const App =
-  ({ renderDot, querySelector }) =>
+  ({ renderDot, querySelector, useEvent }) =>
   () => {
-    const [reason, setReason] = useState(/** @type {Error | null} */ (null));
     const [cranks, setCranks] = useState(
       /** @type {{ crankNum: number, events: readonly any[], lines: readonly string[] }[]} */ ([]),
     );
     const [cranksToShow, setCranksToShow] = useState(1);
-    const [notes, setNotes] = useState(
+    const [focus, setFocus] = useState(
+      /** @type {Record<string, SlogEntry[]>} */ ({}),
+    );
+    const [rawNotes] = useState(
       /** @type {SlogAnnotation} */ (
         JSON.parse(querySelector('textarea[name="annotations"]').value)
       ),
     );
+    const notes = {
+      ...rawNotes,
+      objects: fromEntries(values(rawNotes.exports).flatMap(m => entries(m))),
+    };
 
     const handler = ev => {
       const [file] = ev.target?.files;
@@ -447,6 +551,13 @@ const App =
       renderDot(dot);
     }, [cranks, cranksToShow]);
 
+    useEvent('hashchange', ev => {
+      const hash = ev.target.location.hash;
+      const kobjs = hash.slice(1).split(',');
+      setFocus(findUsages(kobjs, cranks, cranksToShow));
+      console.log('@@focus', focus);
+    });
+
     return html`
       <fieldset>
         <label
@@ -464,10 +575,23 @@ const App =
         <br />
         ${cranksToShow} of ${cranks.length} cranks
       </fieldset>
-      <textarea rows="15" cols="120">
+      <textarea rows="10" cols="120">
       ${(cranks[cranksToShow - 1]?.lines || []).join('\n')}
       </textarea
       >
+      ${entries(focus).map(
+        ([kobj, events]) => html`
+          <div>
+            <h4>
+              ${kobj}${kobj in notes.objects ? `: ${notes.objects[kobj]}` : ''}
+            </h4>
+            <pre>
+      ${events.map(e => JSON.stringify(e)).join('\n')}
+      </pre
+            >
+          </div>
+        `,
+      )}
     `;
   };
 
@@ -477,6 +601,17 @@ const go = () => {
     html`<${App({
       renderDot: globalThis.renderDot,
       querySelector: sel => document.querySelector(sel),
+      useEvent: (event, handler, passive = false) => {
+        useEffect(() => {
+          // initiate the event handler
+          window.addEventListener(event, handler, passive);
+
+          // this will clean up the event every time the component is re-rendered
+          return function cleanup() {
+            window.removeEventListener(event, handler);
+          };
+        });
+      },
     })} />`,
     container,
   );
