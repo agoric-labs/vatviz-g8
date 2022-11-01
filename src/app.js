@@ -10,6 +10,7 @@ const { entries, fromEntries, freeze, values } = Object;
 // Initialize htm with Preact
 export const html = htm.bind(h);
 
+/** @param {string} [why] */
 const die = why => {
   throw new Error(why);
 };
@@ -138,6 +139,7 @@ const fmtDot = () => {
     nodeCluster: (c, cAttrs, items) =>
       `subgraph cluster_${c} { ${fmtAttrs(
         cAttrs,
+        ';\n',
       )}; node [shape=none]; ${c} [label=""]; ${[...items].join(';\n')} }`,
     arc: (src, dest, attrs = {}) => `${src} -> ${dest}` + withAttrs(attrs),
     node: (n, attrs) => n + withAttrs(attrs),
@@ -283,6 +285,8 @@ const slogToDot = (cranks, cranksToShow, notes) => {
     .flat();
   const currentCrankNum = crankStartNum(cranks[cranksToShow - 1].events[0]);
 
+  let summary;
+
   for (const event of events) {
     const { type } = event;
     typeCounts.set(type, (typeCounts.get(type) || 0) + 1);
@@ -319,6 +323,7 @@ const slogToDot = (cranks, cranksToShow, notes) => {
             const { vatID } = event;
             const name = notes.vats[vatID];
             vats.push({ vatID, name });
+            summary = { tag: 'startVat', vatID };
             break;
           }
 
@@ -328,6 +333,7 @@ const slogToDot = (cranks, cranksToShow, notes) => {
             kopToVat.set(target, vatID);
 
             if (!current) break;
+            summary = { tag: 'message', vatID };
             msgs.push(event);
             break;
           }
@@ -335,6 +341,7 @@ const slogToDot = (cranks, cranksToShow, notes) => {
             const [_n, resolutions] = event.kd;
             if (current) {
               notifies.push(event);
+              summary = { tag: 'notify', vatID: event.vatID };
               break;
             }
             for (const [kp] of resolutions) {
@@ -405,7 +412,13 @@ const slogToDot = (cranks, cranksToShow, notes) => {
       return cl.map(e => [e.kobj, d.portRef(`${v.vatID}_exports`, e.kobj)]);
     }),
   );
-  console.log({ pendingPromises, pendingSends, msgs, objToImpPort });
+  console.log({
+    currentCrankNum,
+    pendingPromises,
+    pendingSends,
+    msgs,
+    objToImpPort,
+  });
 
   const portOpt = o => objToImpPort.get(o) || o;
 
@@ -479,18 +492,31 @@ const slogToDot = (cranks, cranksToShow, notes) => {
       },
     );
 
-    return d.nodeCluster(vatID, { label: name ? `${vatID}:${name}` : vatID }, [
-      d.node(`${vatID}_exports`, {
-        shape: 'record',
-        fontsize: 10,
-        label: clistRec(vatID),
-      }),
-      ...importItems,
-      ...[
-        ...internalObjects.map(d.node),
-        ...(pendingPromises.get(vatID) || []).map(d.node),
+    const active = summary.vatID === vatID;
+    const vatColors = {
+      message: 'DeepSkyBlue',
+      notify: 'DarkTurquoise',
+      startVat: 'Aquamarine',
+    };
+    return d.nodeCluster(
+      vatID,
+      {
+        label: name ? `${vatID}:${name}` : vatID,
+        ...(active ? { style: 'filled', color: vatColors[summary.tag] } : {}),
+      },
+      [
+        d.node(`${vatID}_exports`, {
+          shape: 'record',
+          fontsize: 10,
+          label: clistRec(vatID),
+        }),
+        ...importItems,
+        ...[
+          ...internalObjects.map(d.node),
+          ...(pendingPromises.get(vatID) || []).map(d.node),
+        ],
       ],
-    ]);
+    );
   });
 
   // const objLabels = entries(notes.objects).map(([obj, label]) =>
