@@ -286,7 +286,8 @@ const slogToDot = (cranks, cranksToShow, notes) => {
   for (const event of events) {
     const { type } = event;
     typeCounts.set(type, (typeCounts.get(type) || 0) + 1);
-    const current = crankStartNum(event) === currentCrankNum;
+    // @ts-ignore it's ok if .crankNum is undefined
+    const current = event.crankNum === currentCrankNum;
 
     switch (type) {
       case 'clist': {
