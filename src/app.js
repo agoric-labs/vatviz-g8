@@ -95,8 +95,9 @@ const parseCranks = slogText => {
 
 const threshold = 8;
 const fmtMsg = ({ body, slots }) => {
-  const [method] = JSON.parse(body);
-  const args = body.slice(`["${method}"]`.length);
+  const bodyj = body.replace(/^#/, '');
+  const [method] = JSON.parse(bodyj);
+  const args = bodyj.slice(`["${method}"]`.length);
   return `.${method}(${args.slice(0, threshold)}${
     args.length > threshold ? `...${args.length}` : ''
   }, ${slots.slice(0, 3).join(',')})`;
