@@ -295,6 +295,11 @@ const slogToDot = (cranks, cranksToShow, notes) => {
     const current = event.crankNum === currentCrankNum;
 
     switch (type) {
+      case 'create-vat':
+        const { vatID, name } = event;
+        vats.push({ vatID, name });
+        summary = { type: 'create-vat', vatID, name };
+        break;
       case 'clist': {
         switch (event.mode) {
           case 'import':
@@ -322,8 +327,8 @@ const slogToDot = (cranks, cranksToShow, notes) => {
         switch (event.kd[0]) {
           case 'startVat': {
             const { vatID } = event;
-            const name = notes.vats[vatID];
-            vats.push({ vatID, name });
+            // const name = notes.vats[vatID];
+            // vats.push({ vatID, name });
             summary = { tag: 'startVat', vatID };
             break;
           }
