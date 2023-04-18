@@ -95,8 +95,9 @@ const parseCranks = slogText => {
 
 const threshold = 8;
 const fmtMsg = ({ body, slots }) => {
-  const [method] = JSON.parse(body);
-  const args = body.slice(`["${method}"]`.length);
+  const bodyj = body.replace(/^#/, '');
+  const [method] = JSON.parse(bodyj);
+  const args = bodyj.slice(`["${method}"]`.length);
   return `.${method}(${args.slice(0, threshold)}${
     args.length > threshold ? `...${args.length}` : ''
   }, ${slots.slice(0, 3).join(',')})`;
@@ -294,6 +295,11 @@ const slogToDot = (cranks, cranksToShow, notes) => {
     const current = event.crankNum === currentCrankNum;
 
     switch (type) {
+      case 'create-vat':
+        const { vatID, name } = event;
+        vats.push({ vatID, name });
+        summary = { type: 'create-vat', vatID, name };
+        break;
       case 'clist': {
         switch (event.mode) {
           case 'import':
@@ -321,8 +327,8 @@ const slogToDot = (cranks, cranksToShow, notes) => {
         switch (event.kd[0]) {
           case 'startVat': {
             const { vatID } = event;
-            const name = notes.vats[vatID];
-            vats.push({ vatID, name });
+            // const name = notes.vats[vatID];
+            // vats.push({ vatID, name });
             summary = { tag: 'startVat', vatID };
             break;
           }
