@@ -176,13 +176,24 @@ const placesIn = (
   return walk(x);
 };
 
+const smallCaps = {
+  parseBody: body => JSON.parse(body.replace(/^#/, '')),
+  isSlotRef: x => typeof x === 'string' && /^\$/.test(x),
+  getIFace: x => {
+    const parts = x.match(/^\$\d+\.Alleged: (?<iface>.*)/);
+    return parts?.groups?.iface || x;
+  },
+};
+
 const theSlotRef = (target, { body, slots }) => {
-  const methargs = JSON.parse(body);
+  const methargs = smallCaps.parseBody(body);
   const ix = slots.findIndex(s => s === target);
   /** @returns {string | false} */
   const walk = tr => {
     if (tr === null) return false;
-    else if (typeof tr === 'object') {
+    else if (smallCaps.isSlotRef(tr)) {
+      return smallCaps.getIFace(tr);
+    } else if (typeof tr === 'object') {
       if ('@qclass' in tr) {
         if (tr['@qclass'] === 'slot' && tr.index === ix)
           return tr.iface || JSON.stringify(tr);
@@ -200,7 +211,7 @@ const theSlotRef = (target, { body, slots }) => {
     }
     return false;
   };
-  return walk(JSON.parse(body)) || die(target);
+  return walk(smallCaps.parseBody(body)) || die(target);
 };
 
 /**
@@ -590,8 +601,9 @@ const App =
     useEvent('hashchange', ev => {
       const hash = ev.target.location.hash;
       const kobjs = hash.slice(1).split(',');
-      setFocus(findUsages(kobjs, cranks, cranksToShow));
-      console.log('@@focus', focus);
+      const usages = findUsages(kobjs, cranks, cranksToShow);
+      setFocus(usages);
+      console.log('@@focus', usages);
     });
 
     return html`
