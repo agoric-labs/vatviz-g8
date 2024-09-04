@@ -304,6 +304,7 @@ const crankColor = ({ tag, vatID }) => {
  * }} SlogAnnotation
  */
 const slogToDot = (cranks, cranksToShow, notes) => {
+  /** @type {{ vatID: VatID, name?: string }[]} */
   const vats = [];
   const sends = [];
   const invokes = [];
@@ -445,11 +446,9 @@ const slogToDot = (cranks, cranksToShow, notes) => {
   }
   console.log({ typeCounts });
 
+  const pass1 = groupBy([...kopToVat.keys()], o => kopToVat.get(o) || die());
   const vatContents = new Map(
-    vats.map(({ vatID: v }) => [
-      v,
-      [...kopToVat.keys()].filter(o => kopToVat.get(o) === v),
-    ]),
+    vats.map(({ vatID: v }) => [v, pass1.get(v) || []]),
   );
 
   const d = fmtDot();
@@ -584,7 +583,46 @@ const slogToDot = (cranks, cranksToShow, notes) => {
     ...msgArcs,
     ...importArcs,
   ]);
-  return { dot };
+
+  const skipPromise = o => !o.startsWith('kp');
+  const exposedObjects = clist.importing.map(x => x.kobj).filter(skipPromise);
+  const nodeInfo = vats.flatMap(({ vatID, name }) => {
+    const myExported = (vatContents.get(vatID) || []).filter(o =>
+      exposedObjects.includes(o),
+    );
+    // TODO: filter by clist exporting?
+    return [{ vatID, name }, ...myExported.map(kobj => ({ kobj }))];
+  });
+  const renderAccessMatrix = () => {
+    const blankCell = html`<td></td>`;
+    const importCell = html`<td class="import">I</td>`;
+    const exportCell = html`<td>o</td>`; // TODO?
+
+    const rows = nodeInfo.map((rowHd, rowIx) => {
+      const cells = nodeInfo.flatMap((colHd, colIx) => {
+        if (colIx >= rowIx) return [];
+        if (!('vatID' in colHd)) return [blankCell];
+        if ('vatID' in rowHd) return [blankCell];
+        const { kobj } = rowHd;
+        const haystack = importsBySrc.get(colHd.vatID) || [];
+        if (haystack.find(e => e.kobj === kobj)) return [importCell];
+        // TODO: export cells?
+        return [blankCell];
+      });
+      return html`<tr>
+        ${cells}
+        ${'vatID' in rowHd
+          ? html`<th class="vatID">${rowHd.vatID}</th>
+              <th class="vatName" colspan="4">${rowHd.name}</th>`
+          : html`<th>${rowHd.kobj}</th>`}
+      </tr>`;
+    });
+    return html`<table border="1">
+      ${rows}
+    </table>`;
+  };
+
+  return { dot, accessMatrix: renderAccessMatrix() };
 };
 
 const App =
@@ -594,6 +632,7 @@ const App =
       /** @type {{ crankNum: number, events: readonly any[], lines: readonly string[] }[]} */ ([]),
     );
     const [cranksToShow, setCranksToShow] = useState(1);
+    const [matrix, setMatrix] = useState(html`<table border="1"></table>`);
     const [focus, setFocus] = useState(
       /** @type {Record<string, SlogEntry[]>} */ ({}),
     );
@@ -629,9 +668,12 @@ const App =
 
     useEffect(() => {
       if (!cranks.length) return;
-      const { dot } = slogToDot(cranks, cranksToShow, notes);
-      console.log('renderDot:', dot);
-      renderDot(dot);
+      const { dot, accessMatrix } = slogToDot(cranks, cranksToShow, notes);
+      setMatrix(accessMatrix);
+      if (false) {
+        console.log('renderDot:', dot);
+        renderDot(dot);
+      }
     }, [cranks, cranksToShow]);
 
     useEvent('hashchange', ev => {
@@ -676,6 +718,8 @@ const App =
           </div>
         `,
       )}
+      <hr />
+      ${matrix}
     `;
   };
 
