@@ -219,6 +219,8 @@ const theSlotRef = (target, { body, slots }) => {
   return walk(smallCaps.parseBody(body)) || die(target);
 };
 
+const unique = xs => xs.filter((x, ix, array) => array.indexOf(x) === ix);
+
 /**
  * @param {string[]} kobjs
  * @param {Crank[]} cranks
@@ -262,7 +264,9 @@ const findUsages = (kobjs, cranks, cranksToShow) => {
     return [];
   };
 
-  return fromEntries(kobjs.map(k => [k, events.flatMap(e => usages(k, e))]));
+  return fromEntries(
+    kobjs.map(k => [k, unique(events.flatMap(e => usages(k, e)))]),
+  );
 };
 
 /**
