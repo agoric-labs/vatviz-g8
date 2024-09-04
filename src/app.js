@@ -221,6 +221,38 @@ const theSlotRef = (target, { body, slots }) => {
 
 const unique = xs => xs.filter((x, ix, array) => array.indexOf(x) === ix);
 
+const objInEvent = (/** @type {KoID} */ k, /** @type {SlogEntry} */ e) => {
+  switch (e.type) {
+    case 'deliver':
+      switch (e.kd[0]) {
+        case 'message':
+          if (e.kd[1] === k) return [k + fmtMsg(e.kd[2].methargs)];
+          if (e.kd[2].methargs.slots.includes(k)) {
+            return [theSlotRef(k, e.kd[2].methargs)];
+          }
+          break;
+        case 'notify':
+          for (const [_kp, { data }] of e.kd[1]) {
+            if (data.slots.includes(k)) {
+              return [theSlotRef(k, data)];
+            }
+          }
+          break;
+      }
+      break;
+    case 'syscall': {
+      switch (e.ksc[0]) {
+        case 'send':
+          if (e.ksc[1] === k) return [k + fmtMsg(e.ksc[2].methargs)];
+          if (e.ksc[2].methargs.slots.includes(k)) {
+            return [theSlotRef(k, e.ksc[2].methargs)];
+          }
+      }
+    }
+  }
+  return [];
+};
+
 /**
  * @param {string[]} kobjs
  * @param {Crank[]} cranks
@@ -232,40 +264,8 @@ const findUsages = (kobjs, cranks, cranksToShow) => {
     .map(c => c.events)
     .flat();
 
-  const usages = (/** @type {string} */ k, /** @type {SlogEntry} */ e) => {
-    switch (e.type) {
-      case 'deliver':
-        switch (e.kd[0]) {
-          case 'message':
-            if (e.kd[1] === k) return [k + fmtMsg(e.kd[2].methargs)];
-            if (e.kd[2].methargs.slots.includes(k)) {
-              return [theSlotRef(k, e.kd[2].methargs)];
-            }
-            break;
-          case 'notify':
-            for (const [_kp, { data }] of e.kd[1]) {
-              if (data.slots.includes(k)) {
-                return [theSlotRef(k, data)];
-              }
-            }
-            break;
-        }
-        break;
-      case 'syscall': {
-        switch (e.ksc[0]) {
-          case 'send':
-            if (e.ksc[1] === k) return [k + fmtMsg(e.ksc[2].methargs)];
-            if (e.ksc[2].methargs.slots.includes(k)) {
-              return [theSlotRef(k, e.ksc[2].methargs)];
-            }
-        }
-      }
-    }
-    return [];
-  };
-
   return fromEntries(
-    kobjs.map(k => [k, unique(events.flatMap(e => usages(k, e)))]),
+    kobjs.map(k => [k, unique(events.flatMap(e => objInEvent(k, e)))]),
   );
 };
 
