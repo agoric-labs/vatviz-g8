@@ -14,7 +14,7 @@ export const html = htm.bind(h);
 const die = why => {
   throw new Error(why);
 };
-/** @type {<T,U>(x:T, f:(xx:T) => U) => U[]} */
+/** @type {<T,U>(x:T | undefined, f:(xx:T) => U) => U[]} */
 const maybe = (x, f) => (x ? [f(x)] : []);
 
 /**
