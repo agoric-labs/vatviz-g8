@@ -254,7 +254,7 @@ const objInEvent = (/** @type {KoID} */ k, /** @type {SlogEntry} */ e) => {
 };
 
 /**
- * @param {string[]} kobjs
+ * @param {KoID[]} kobjs
  * @param {Crank[]} cranks
  * @param {number} cranksToShow
  */
@@ -269,15 +269,38 @@ const findUsages = (kobjs, cranks, cranksToShow) => {
   );
 };
 
+const vatColors = {
+  message: 'DeepSkyBlue',
+  notify: 'DarkTurquoise',
+  startVat: 'Aquamarine',
+  'create-vat': 'Aquamarine',
+};
+/**
+ * @typedef {{
+ *   tag: 'create-vat' | 'startVat' | 'message' | 'notify';
+ *   vatID: VatID;
+ *   name?: string;
+ * }} Summary
+ */
+
+/** @param {Summary} summary */
+const crankColor = ({ tag, vatID }) => {
+  const color = vatColors[tag];
+  if (!color) {
+    console.warn('no color for', vatID, tag);
+  }
+  return color || 'orange';
+};
+
 /**
  *
  * @param {Crank[]} cranks
  * @param {number} cranksToShow
  * @param {SlogAnnotation} notes
  * @typedef {{
- *   vats: Record<string, string>,
- *   exports: Record<string, Record<string, string>>,
- *   objects: Record<string, string>,
+ *   vats: Record<VatID, string>,
+ *   exports: Record<VatID, Record<KoID, string>>,
+ *   objects: Record<KoID, string>,
  * }} SlogAnnotation
  */
 const slogToDot = (cranks, cranksToShow, notes) => {
@@ -293,11 +316,11 @@ const slogToDot = (cranks, cranksToShow, notes) => {
   };
   /** @type {Map<string, number>} */
   const typeCounts = new Map();
-  /** @type {Map<string, string>} */
+  /** @type {Map<KoID | KpID, VatID>} */
   const kopToVat = new Map();
-  /** @type {Map<string, string[]>} */
+  /** @type {Map<VatID, KpID[]>} */
   const pendingPromises = new Map();
-  /** @type {Map<string, SlogSyscallEntry>} */
+  /** @type {Map<KpID, SlogSyscallEntry & { ksc: ['send', KoID | KpID, Message] }>} */
   const pendingSends = new Map();
 
   const events = cranks
@@ -306,6 +329,7 @@ const slogToDot = (cranks, cranksToShow, notes) => {
     .flat();
   const currentCrankNum = crankStartNum(cranks[cranksToShow - 1].events[0]);
 
+  /** @type {Summary} */
   let summary;
 
   for (const event of events) {
@@ -318,7 +342,7 @@ const slogToDot = (cranks, cranksToShow, notes) => {
       case 'create-vat':
         const { vatID, name } = event;
         vats.push({ vatID, name });
-        summary = { type: 'create-vat', vatID, name };
+        summary = { tag: 'create-vat', vatID, name };
         break;
       case 'clist': {
         switch (event.mode) {
@@ -396,7 +420,7 @@ const slogToDot = (cranks, cranksToShow, notes) => {
           case 'send': {
             const [_s, _t, { result }] = ksc;
             kopToVat.set(result, event.vatID);
-            pendingSends.set(result, event);
+            pendingSends.set(result, { ...event, ksc });
 
             if (!current) break;
 
@@ -446,19 +470,24 @@ const slogToDot = (cranks, cranksToShow, notes) => {
     objToImpPort,
   });
 
-  const portOpt = o => objToImpPort.get(o) || o;
+  /** @param {KoID | KpID} id */
+  const portOpt = id => objToImpPort.get(/** @type {KoID} */ (id)) || id;
 
   const msgArcs = msgs.map(({ kd: [_m, target, { methargs, result }] }) =>
     d.arc(kopToVat.get(result) || result, portOpt(target), {
       label: fmtMsg(methargs),
     }),
   );
-  const pendingArc = kp => e =>
-    d.arc(kp, portOpt(e.ksc[1]), {
-      label: fmtMsg(e.ksc[2].methargs),
-      style: 'dashed',
-      fontsize: 8,
-    });
+  /** @param {KpID} kp */
+  const pendingArc =
+    kp =>
+    /** @param {SlogSyscallEntry & {ksc: ['send', KoID | KpID, Message]}} e */
+    e =>
+      d.arc(kp, portOpt(e.ksc[1]), {
+        label: fmtMsg(e.ksc[2].methargs),
+        style: 'dashed',
+        fontsize: 8,
+      });
   const pendingSendArcs = [...pendingPromises.values()].flatMap(kps =>
     kps.flatMap(kp => maybe(pendingSends.get(kp), pendingArc(kp))),
   );
@@ -519,16 +548,11 @@ const slogToDot = (cranks, cranksToShow, notes) => {
     );
 
     const active = summary.vatID === vatID;
-    const vatColors = {
-      message: 'DeepSkyBlue',
-      notify: 'DarkTurquoise',
-      startVat: 'Aquamarine',
-    };
     return d.nodeCluster(
       vatID,
       {
         label: name ? `${vatID}:${name}` : vatID,
-        ...(active ? { style: 'filled', color: vatColors[summary.tag] } : {}),
+        ...(active ? { style: 'filled', color: crankColor(summary) } : {}),
       },
       [
         d.node(`${vatID}_exports`, {
@@ -552,7 +576,7 @@ const slogToDot = (cranks, cranksToShow, notes) => {
     e.kd[1].map(r => d.node(r[0], { style: r[1] ? 'bold' : 'italic' })),
   );
 
-  return d.digraph({ rankdir: 'LR', fontsize: 10 }, [
+  const dot = d.digraph({ rankdir: 'LR', fontsize: 10 }, [
     // ...objLabels,
     ...pLabels,
     ...clusters,
@@ -560,6 +584,7 @@ const slogToDot = (cranks, cranksToShow, notes) => {
     ...msgArcs,
     ...importArcs,
   ]);
+  return { dot };
 };
 
 const App =
@@ -577,8 +602,10 @@ const App =
         JSON.parse(querySelector('textarea[name="annotations"]').value)
       ),
     );
+    /** @type {SlogAnnotation} */
     const notes = {
       ...rawNotes,
+      // @ts-expect-error grumble: entries() doesn't preserve the key type
       objects: fromEntries(values(rawNotes.exports).flatMap(m => entries(m))),
     };
 
@@ -602,7 +629,7 @@ const App =
 
     useEffect(() => {
       if (!cranks.length) return;
-      const dot = slogToDot(cranks, cranksToShow, notes);
+      const { dot } = slogToDot(cranks, cranksToShow, notes);
       console.log('renderDot:', dot);
       renderDot(dot);
     }, [cranks, cranksToShow]);
