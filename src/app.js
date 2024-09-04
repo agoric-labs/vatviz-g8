@@ -178,7 +178,12 @@ const placesIn = (
 
 const smallCaps = {
   parseBody: body => JSON.parse(body.replace(/^#/, '')),
-  isSlotRef: x => typeof x === 'string' && /^\$/.test(x),
+  asSlotRef: x => {
+    if (typeof x !== 'string') return null;
+    const parts = x.match(/^\$(?<ref>\d+)/);
+    if (!parts) return null;
+    return Number(parts?.groups?.ref);
+  },
   getIFace: x => {
     const parts = x.match(/^\$\d+\.Alleged: (?<iface>.*)/);
     return parts?.groups?.iface || x;
@@ -191,7 +196,7 @@ const theSlotRef = (target, { body, slots }) => {
   /** @returns {string | false} */
   const walk = tr => {
     if (tr === null) return false;
-    else if (smallCaps.isSlotRef(tr)) {
+    else if (smallCaps.asSlotRef(tr) === ix) {
       return smallCaps.getIFace(tr);
     } else if (typeof tr === 'object') {
       if ('@qclass' in tr) {
