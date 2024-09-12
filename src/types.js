@@ -8,9 +8,14 @@
  * @typedef {{
  *   time: number
  * }} SlogTimedEntry
+ *
+ * @typedef {`v{number}`} VatID
+ * @typedef {`ko{number}`} KoID
+ * @typedef {`kp{number}`} KpID
+ *
  * @typedef { SlogTimedEntry & {
  *   crankNum: number,
- *   vatID: string,
+ *   vatID: VatID,
  *   deliveryNum: number,
  * }} SlogVatEntry
  *
@@ -19,9 +24,9 @@
  *   kd: KernelDelivery,
  * }} SlogDeliveryEntry
  * @typedef { |
- *   [tag: 'message', target: string, msg: Message] |
+ *   [tag: 'message', target: KoID, msg: Message] |
  *   [tag: 'notify', resolutions: Array<[
- *       kp: string,
+ *       kp: KpID,
  *       desc: { fulfilled: boolean, refCount: number, data: CapData },
  *     ]>] |
  *   [tag: 'retireImports' | 'retireExports' | 'dropExports']
@@ -29,7 +34,7 @@
  * } KernelDelivery
  * @typedef {{
  *   methargs: CapData,
- *   result: string,
+ *   result: KpID,
  * }} Message
  * @typedef {{
  *   body: string,
@@ -40,20 +45,20 @@
  *   ksc: [tag: 'invoke' | 'vatstoreGet'| 'vatstoreGetAfter'|
  *              'vatstoreSet' | 'vatstoreDelete' |
  *              'dropImports' | 'retireImports' | 'retireExports' ] |
- *        [tag: 'send', target: string, msg: Message] |
- *        [tag: 'subscribe', xx: unknown, p: string] |
- *        [tag: 'resolve', target: string,
- *         resolutions: Array<[kp: string, rejected: boolean, value: CapData]>],
+ *        [tag: 'send', target: KoID | KpID, msg: Message] |
+ *        [tag: 'subscribe', xx: unknown, p: KpID] |
+ *        [tag: 'resolve', target: KpID,
+ *         resolutions: Array<[kp: KpID, rejected: boolean, value: CapData]>],
  * }} SlogSyscallEntry
  *
  * @typedef { SlogTimedEntry & {
  *   type: 'create-vat',
- *   vatID: string,
+ *   vatID: VatID,
  *   dynamic?: boolean,
  *   description?: string,
  *   name?: string,
  *   managerType?: string,
- *   vatParameters?: Record<string, unknown>,
+ *   vatParameters?: Record<VatID, unknown>,
  *   vatSourceBundle?: unknown,
  * }} SlogCreateVatEntry
  * @typedef { SlogTimedEntry & {
@@ -63,14 +68,14 @@
  * }} SlogEndBlockStartEntry
  * @typedef { SlogTimedEntry & {
  *   type: 'deliver-result',
- *   vatID: string,
+ *   vatID: VatID,
  *   dr: [tag: unknown, x: unknown, meter: {}],
  * }} SlogDeliverResultEntry
  * @typedef { SlogTimedEntry & {
  *  type: 'crank-start', crankNum: number, crankType: string }} SlogCrankStartEntry
  * @typedef { SlogTimedEntry & {
  *  type: 'clist', mode: 'import' | 'export' | 'drop',
- *  vatID: string, vobj: string, kobj: string }} SlogCListEntry
+ *  vatID: VatID, vobj: string, kobj: KoID }} SlogCListEntry
  * @typedef { SlogTimedEntry & {
  *   type: 'import-kernel-start' | 'import-kernel-finish'
  *       | 'vat-startup-start' | 'vat-startup-finish'

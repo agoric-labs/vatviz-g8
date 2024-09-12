@@ -14,7 +14,7 @@ export const html = htm.bind(h);
 const die = why => {
   throw new Error(why);
 };
-/** @type {<T,U>(x:T, f:(xx:T) => U) => U[]} */
+/** @type {<T,U>(x:T | undefined, f:(xx:T) => U) => U[]} */
 const maybe = (x, f) => (x ? [f(x)] : []);
 
 /**
@@ -95,8 +95,9 @@ const parseCranks = slogText => {
 
 const threshold = 8;
 const fmtMsg = ({ body, slots }) => {
-  const [method] = JSON.parse(body);
-  const args = body.slice(`["${method}"]`.length);
+  const bodyj = body.replace(/^#/, '');
+  const [method] = JSON.parse(bodyj);
+  const args = bodyj.slice(`["${method}"]`.length);
   return `.${method}(${args.slice(0, threshold)}${
     args.length > threshold ? `...${args.length}` : ''
   }, ${slots.slice(0, 3).join(',')})`;
@@ -175,13 +176,29 @@ const placesIn = (
   return walk(x);
 };
 
+const smallCaps = {
+  parseBody: body => JSON.parse(body.replace(/^#/, '')),
+  asSlotRef: x => {
+    if (typeof x !== 'string') return null;
+    const parts = x.match(/^\$(?<ref>\d+)/);
+    if (!parts) return null;
+    return Number(parts?.groups?.ref);
+  },
+  getIFace: x => {
+    const parts = x.match(/^\$\d+\.Alleged: (?<iface>.*)/);
+    return parts?.groups?.iface || x;
+  },
+};
+
 const theSlotRef = (target, { body, slots }) => {
-  const methargs = JSON.parse(body);
+  const methargs = smallCaps.parseBody(body);
   const ix = slots.findIndex(s => s === target);
   /** @returns {string | false} */
   const walk = tr => {
     if (tr === null) return false;
-    else if (typeof tr === 'object') {
+    else if (smallCaps.asSlotRef(tr) === ix) {
+      return smallCaps.getIFace(tr);
+    } else if (typeof tr === 'object') {
       if ('@qclass' in tr) {
         if (tr['@qclass'] === 'slot' && tr.index === ix)
           return tr.iface || JSON.stringify(tr);
@@ -199,11 +216,45 @@ const theSlotRef = (target, { body, slots }) => {
     }
     return false;
   };
-  return walk(JSON.parse(body)) || die(target);
+  return walk(smallCaps.parseBody(body)) || die(target);
+};
+
+const unique = xs => xs.filter((x, ix, array) => array.indexOf(x) === ix);
+
+const objInEvent = (/** @type {KoID} */ k, /** @type {SlogEntry} */ e) => {
+  switch (e.type) {
+    case 'deliver':
+      switch (e.kd[0]) {
+        case 'message':
+          if (e.kd[1] === k) return [k + fmtMsg(e.kd[2].methargs)];
+          if (e.kd[2].methargs.slots.includes(k)) {
+            return [theSlotRef(k, e.kd[2].methargs)];
+          }
+          break;
+        case 'notify':
+          for (const [_kp, { data }] of e.kd[1]) {
+            if (data.slots.includes(k)) {
+              return [theSlotRef(k, data)];
+            }
+          }
+          break;
+      }
+      break;
+    case 'syscall': {
+      switch (e.ksc[0]) {
+        case 'send':
+          if (e.ksc[1] === k) return [k + fmtMsg(e.ksc[2].methargs)];
+          if (e.ksc[2].methargs.slots.includes(k)) {
+            return [theSlotRef(k, e.ksc[2].methargs)];
+          }
+      }
+    }
+  }
+  return [];
 };
 
 /**
- * @param {string[]} kobjs
+ * @param {KoID[]} kobjs
  * @param {Crank[]} cranks
  * @param {number} cranksToShow
  */
@@ -213,39 +264,32 @@ const findUsages = (kobjs, cranks, cranksToShow) => {
     .map(c => c.events)
     .flat();
 
-  const usages = (/** @type {string} */ k, /** @type {SlogEntry} */ e) => {
-    switch (e.type) {
-      case 'deliver':
-        switch (e.kd[0]) {
-          case 'message':
-            if (e.kd[1] === k) return [k + fmtMsg(e.kd[2].methargs)];
-            if (e.kd[2].methargs.slots.includes(k)) {
-              return [theSlotRef(k, e.kd[2].methargs)];
-            }
-            break;
-          case 'notify':
-            for (const [_kp, { data }] of e.kd[1]) {
-              if (data.slots.includes(k)) {
-                return [theSlotRef(k, data)];
-              }
-            }
-            break;
-        }
-        break;
-      case 'syscall': {
-        switch (e.ksc[0]) {
-          case 'send':
-            if (e.ksc[1] === k) return [k + fmtMsg(e.ksc[2].methargs)];
-            if (e.ksc[2].methargs.slots.includes(k)) {
-              return [theSlotRef(k, e.ksc[2].methargs)];
-            }
-        }
-      }
-    }
-    return [];
-  };
+  return fromEntries(
+    kobjs.map(k => [k, unique(events.flatMap(e => objInEvent(k, e)))]),
+  );
+};
 
-  return fromEntries(kobjs.map(k => [k, events.flatMap(e => usages(k, e))]));
+const vatColors = {
+  message: 'DeepSkyBlue',
+  notify: 'DarkTurquoise',
+  startVat: 'Aquamarine',
+  'create-vat': 'Aquamarine',
+};
+/**
+ * @typedef {{
+ *   tag: 'create-vat' | 'startVat' | 'message' | 'notify';
+ *   vatID: VatID;
+ *   name?: string;
+ * }} Summary
+ */
+
+/** @param {Summary} summary */
+const crankColor = ({ tag, vatID }) => {
+  const color = vatColors[tag];
+  if (!color) {
+    console.warn('no color for', vatID, tag);
+  }
+  return color || 'orange';
 };
 
 /**
@@ -254,12 +298,13 @@ const findUsages = (kobjs, cranks, cranksToShow) => {
  * @param {number} cranksToShow
  * @param {SlogAnnotation} notes
  * @typedef {{
- *   vats: Record<string, string>,
- *   exports: Record<string, Record<string, string>>,
- *   objects: Record<string, string>,
+ *   vats: Record<VatID, string>,
+ *   exports: Record<VatID, Record<KoID, string>>,
+ *   objects: Record<KoID, string>,
  * }} SlogAnnotation
  */
 const slogToDot = (cranks, cranksToShow, notes) => {
+  /** @type {{ vatID: VatID, name?: string }[]} */
   const vats = [];
   const sends = [];
   const invokes = [];
@@ -272,11 +317,11 @@ const slogToDot = (cranks, cranksToShow, notes) => {
   };
   /** @type {Map<string, number>} */
   const typeCounts = new Map();
-  /** @type {Map<string, string>} */
+  /** @type {Map<KoID | KpID, VatID>} */
   const kopToVat = new Map();
-  /** @type {Map<string, string[]>} */
+  /** @type {Map<VatID, KpID[]>} */
   const pendingPromises = new Map();
-  /** @type {Map<string, SlogSyscallEntry>} */
+  /** @type {Map<KpID, SlogSyscallEntry & { ksc: ['send', KoID | KpID, Message] }>} */
   const pendingSends = new Map();
 
   const events = cranks
@@ -285,6 +330,7 @@ const slogToDot = (cranks, cranksToShow, notes) => {
     .flat();
   const currentCrankNum = crankStartNum(cranks[cranksToShow - 1].events[0]);
 
+  /** @type {Summary} */
   let summary;
 
   for (const event of events) {
@@ -294,6 +340,11 @@ const slogToDot = (cranks, cranksToShow, notes) => {
     const current = event.crankNum === currentCrankNum;
 
     switch (type) {
+      case 'create-vat':
+        const { vatID, name } = event;
+        vats.push({ vatID, name });
+        summary = { tag: 'create-vat', vatID, name };
+        break;
       case 'clist': {
         switch (event.mode) {
           case 'import':
@@ -321,8 +372,8 @@ const slogToDot = (cranks, cranksToShow, notes) => {
         switch (event.kd[0]) {
           case 'startVat': {
             const { vatID } = event;
-            const name = notes.vats[vatID];
-            vats.push({ vatID, name });
+            // const name = notes.vats[vatID];
+            // vats.push({ vatID, name });
             summary = { tag: 'startVat', vatID };
             break;
           }
@@ -370,7 +421,7 @@ const slogToDot = (cranks, cranksToShow, notes) => {
           case 'send': {
             const [_s, _t, { result }] = ksc;
             kopToVat.set(result, event.vatID);
-            pendingSends.set(result, event);
+            pendingSends.set(result, { ...event, ksc });
 
             if (!current) break;
 
@@ -395,11 +446,9 @@ const slogToDot = (cranks, cranksToShow, notes) => {
   }
   console.log({ typeCounts });
 
+  const pass1 = groupBy([...kopToVat.keys()], o => kopToVat.get(o) || die());
   const vatContents = new Map(
-    vats.map(({ vatID: v }) => [
-      v,
-      [...kopToVat.keys()].filter(o => kopToVat.get(o) === v),
-    ]),
+    vats.map(({ vatID: v }) => [v, pass1.get(v) || []]),
   );
 
   const d = fmtDot();
@@ -420,19 +469,24 @@ const slogToDot = (cranks, cranksToShow, notes) => {
     objToImpPort,
   });
 
-  const portOpt = o => objToImpPort.get(o) || o;
+  /** @param {KoID | KpID} id */
+  const portOpt = id => objToImpPort.get(/** @type {KoID} */ (id)) || id;
 
   const msgArcs = msgs.map(({ kd: [_m, target, { methargs, result }] }) =>
     d.arc(kopToVat.get(result) || result, portOpt(target), {
       label: fmtMsg(methargs),
     }),
   );
-  const pendingArc = kp => e =>
-    d.arc(kp, portOpt(e.ksc[1]), {
-      label: fmtMsg(e.ksc[2].methargs),
-      style: 'dashed',
-      fontsize: 8,
-    });
+  /** @param {KpID} kp */
+  const pendingArc =
+    kp =>
+    /** @param {SlogSyscallEntry & {ksc: ['send', KoID | KpID, Message]}} e */
+    e =>
+      d.arc(kp, portOpt(e.ksc[1]), {
+        label: fmtMsg(e.ksc[2].methargs),
+        style: 'dashed',
+        fontsize: 8,
+      });
   const pendingSendArcs = [...pendingPromises.values()].flatMap(kps =>
     kps.flatMap(kp => maybe(pendingSends.get(kp), pendingArc(kp))),
   );
@@ -493,16 +547,11 @@ const slogToDot = (cranks, cranksToShow, notes) => {
     );
 
     const active = summary.vatID === vatID;
-    const vatColors = {
-      message: 'DeepSkyBlue',
-      notify: 'DarkTurquoise',
-      startVat: 'Aquamarine',
-    };
     return d.nodeCluster(
       vatID,
       {
         label: name ? `${vatID}:${name}` : vatID,
-        ...(active ? { style: 'filled', color: vatColors[summary.tag] } : {}),
+        ...(active ? { style: 'filled', color: crankColor(summary) } : {}),
       },
       [
         d.node(`${vatID}_exports`, {
@@ -526,7 +575,7 @@ const slogToDot = (cranks, cranksToShow, notes) => {
     e.kd[1].map(r => d.node(r[0], { style: r[1] ? 'bold' : 'italic' })),
   );
 
-  return d.digraph({ rankdir: 'LR', fontsize: 10 }, [
+  const dot = d.digraph({ rankdir: 'LR', fontsize: 10 }, [
     // ...objLabels,
     ...pLabels,
     ...clusters,
@@ -534,6 +583,46 @@ const slogToDot = (cranks, cranksToShow, notes) => {
     ...msgArcs,
     ...importArcs,
   ]);
+
+  const skipPromise = o => !o.startsWith('kp');
+  const exposedObjects = clist.importing.map(x => x.kobj).filter(skipPromise);
+  const nodeInfo = vats.flatMap(({ vatID, name }) => {
+    const myExported = (vatContents.get(vatID) || []).filter(o =>
+      exposedObjects.includes(o),
+    );
+    // TODO: filter by clist exporting?
+    return [{ vatID, name }, ...myExported.map(kobj => ({ kobj }))];
+  });
+  const renderAccessMatrix = () => {
+    const blankCell = html`<td></td>`;
+    const importCell = html`<td class="import">I</td>`;
+    const exportCell = html`<td>o</td>`; // TODO?
+
+    const rows = nodeInfo.map((rowHd, rowIx) => {
+      const cells = nodeInfo.flatMap((colHd, colIx) => {
+        if (colIx >= rowIx) return [];
+        if (!('vatID' in colHd)) return [blankCell];
+        if ('vatID' in rowHd) return [blankCell];
+        const { kobj } = rowHd;
+        const haystack = importsBySrc.get(colHd.vatID) || [];
+        if (haystack.find(e => e.kobj === kobj)) return [importCell];
+        // TODO: export cells?
+        return [blankCell];
+      });
+      return html`<tr>
+        ${cells}
+        ${'vatID' in rowHd
+          ? html`<th class="vatID">${rowHd.vatID}</th>
+              <th class="vatName" colspan="4">${rowHd.name}</th>`
+          : html`<th>${rowHd.kobj}</th>`}
+      </tr>`;
+    });
+    return html`<table border="1">
+      ${rows}
+    </table>`;
+  };
+
+  return { dot, accessMatrix: renderAccessMatrix() };
 };
 
 const App =
@@ -543,6 +632,7 @@ const App =
       /** @type {{ crankNum: number, events: readonly any[], lines: readonly string[] }[]} */ ([]),
     );
     const [cranksToShow, setCranksToShow] = useState(1);
+    const [matrix, setMatrix] = useState(html`<table border="1"></table>`);
     const [focus, setFocus] = useState(
       /** @type {Record<string, SlogEntry[]>} */ ({}),
     );
@@ -551,8 +641,10 @@ const App =
         JSON.parse(querySelector('textarea[name="annotations"]').value)
       ),
     );
+    /** @type {SlogAnnotation} */
     const notes = {
       ...rawNotes,
+      // @ts-expect-error grumble: entries() doesn't preserve the key type
       objects: fromEntries(values(rawNotes.exports).flatMap(m => entries(m))),
     };
 
@@ -576,16 +668,20 @@ const App =
 
     useEffect(() => {
       if (!cranks.length) return;
-      const dot = slogToDot(cranks, cranksToShow, notes);
-      console.log('renderDot:', dot);
-      renderDot(dot);
+      const { dot, accessMatrix } = slogToDot(cranks, cranksToShow, notes);
+      setMatrix(accessMatrix);
+      if (false) {
+        console.log('renderDot:', dot);
+        renderDot(dot);
+      }
     }, [cranks, cranksToShow]);
 
     useEvent('hashchange', ev => {
       const hash = ev.target.location.hash;
       const kobjs = hash.slice(1).split(',');
-      setFocus(findUsages(kobjs, cranks, cranksToShow));
-      console.log('@@focus', focus);
+      const usages = findUsages(kobjs, cranks, cranksToShow);
+      setFocus(usages);
+      console.log('@@focus', usages);
     });
 
     return html`
@@ -622,6 +718,8 @@ const App =
           </div>
         `,
       )}
+      <hr />
+      ${matrix}
     `;
   };
 
